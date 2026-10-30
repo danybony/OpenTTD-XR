@@ -27,9 +27,10 @@ using TextEffectID = uint16_t;
 
 static const TextEffectID INVALID_TE_ID = UINT16_MAX;
 
-TextEffectID AddTextEffect(EncodedString &&msg, int x, int y, uint8_t duration, TextEffectMode mode);
+TextEffectID AddTextEffect(EncodedString &&msg, int x, int y, uint8_t duration, TextEffectMode mode, int world_x, int world_y, int world_z);
 void InitTextEffects();
-void DrawTextEffects(DrawPixelInfo *dpi);
+struct Viewport;
+void DrawTextEffects(DrawPixelInfo *dpi, const Viewport *vp = nullptr);
 void UpdateTextEffect(TextEffectID effect_id, EncodedString &&msg);
 void RemoveTextEffect(TextEffectID effect_id);
 void UpdateAllTextEffectVirtCoords();

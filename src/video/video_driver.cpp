@@ -21,6 +21,7 @@
 #include "../thread.h"
 #include "../window_func.h"
 #include "video_driver.hpp"
+#include "proof3d.h"
 
 #include "../safeguards.h"
 
@@ -38,7 +39,9 @@ void VideoDriver::GameLoop()
 	{
 		std::lock_guard<std::mutex> lock(this->game_state_mutex);
 
+		auto start = std::chrono::steady_clock::now();
 		::GameLoop();
+		NoteProof3DGameTick(start);
 	}
 }
 
@@ -157,9 +160,11 @@ void VideoDriver::Tick()
 		}
 
 		this->CheckPaletteAnim();
+		auto paint_start = std::chrono::steady_clock::now();
 		this->Paint();
 
 		this->UnlockVideoBuffer();
+		NoteProof3DPresent(now, paint_start);
 
 		/* Wait till the first successful drawing tick before marking the driver as operational. */
 		static bool first_draw_tick = true;

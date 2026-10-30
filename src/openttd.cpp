@@ -13,6 +13,7 @@
 #include "sound/sound_driver.hpp"
 #include "music/music_driver.hpp"
 #include "video/video_driver.hpp"
+#include "video/proof3d.h"
 #include "mixer.h"
 
 #include "fontcache.h"
@@ -389,6 +390,12 @@ struct AfterNewGRFScan : NewGRFScanCallback {
 		uint last_newgrf_count = _settings_client.gui.last_newgrf_count;
 		LoadFromConfig();
 		_settings_client.gui.last_newgrf_count = last_newgrf_count;
+		/* Apply client presentation after full config loading and driver startup.
+		 * An unsupported backend keeps the preference for the next supported launch. */
+		SetTerrain3DGroundTextures(_settings_client.gui.renderer_3d_ground_textures);
+		SetTerrain3DShadows(_settings_client.gui.renderer_3d_shadows);
+		SetTerrain3DAutoVisibility(_settings_client.gui.renderer_3d_auto_visibility);
+		SetProof3DEnabled(_settings_client.gui.renderer_3d);
 		/* Since the default for the palette might have changed due to
 		 * reading the configuration file, recalculate that now. */
 		UpdateNewGRFConfigPalette();

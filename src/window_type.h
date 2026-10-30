@@ -742,6 +742,7 @@ enum class WindowClass : uint16_t {
 	 *   - 0 = #HelpWindowWidgets
 	 */
 	Help,
+	Retro3D, ///< Local retro pixel display preferences; window number 0.
 
 	Invalid = 0xFFFF, ///< Invalid window.
 };

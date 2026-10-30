@@ -22,6 +22,7 @@
 #include "network/network_client.h"
 #include "command_func.h"
 #include "settings_func.h"
+#include "settings_internal.h"
 #include "fios.h"
 #include "fileio_func.h"
 #include "fontcache.h"
@@ -30,6 +31,44 @@
 #include "string_func.h"
 #include "strings_func.h"
 #include "viewport_func.h"
+#include "video/proof3d.h"
+#include "video/video_driver.hpp"
+#include "video/terrain3d_math.h"
+#include "vehicle_gui.h"
+#include "vehicle_base.h"
+#ifdef WITH_3D_PROOF
+#include "gui.h"
+#include "transparency.h"
+#include "gfx_func.h"
+#include "widgets/vehicle_widget.h"
+#include "widgets/toolbar_widget.h"
+#include "terraform_cmd.h"
+#include "rail_cmd.h"
+#include "rail_gui.h"
+#include "road_gui.h"
+#include "terraform_gui.h"
+#include "widgets/road_widget.h"
+#include "widgets/terraform_widget.h"
+#include "road_map.h"
+#include "station_map.h"
+#include "tunnelbridge_map.h"
+#include "zoom_func.h"
+#include "widgets/rail_widget.h"
+#include "vehicle_cmd.h"
+#include "roadveh_cmd.h"
+#include "train_cmd.h"
+#include "town_cmd.h"
+#include "signs_cmd.h"
+#include "station_cmd.h"
+#include "station_base.h"
+#include "texteff.hpp"
+#include "vehiclelist.h"
+#include "core/backup_type.hpp"
+#include "timer/timer_game_tick.h"
+#include "rail_map.h"
+#include "tilehighlight_func.h"
+#include "tilehighlight_type.h"
+#endif
 #include "window_func.h"
 #include "timer/timer.h"
 #include "company_func.h"
@@ -57,6 +96,741 @@
 
 /* scriptfile handling */
 static uint _script_current_depth; ///< Depth of scripts running (used to abort execution when #ConReturn is encountered).
+
+/** Toggle the client-only rendering proof; never a game command or saved setting. */
+
+static bool ConRenderer3D(std::span<std::string_view> argv)
+{
+#ifdef WITH_3D_PROOF
+	if (argv.size() == 3 && argv[1] == "retro") {
+		/* Scripted application-event checks for the persistent button panel. */
+		Window *w = FindWindowById(WindowClass::Retro3D, 0);
+		if (argv[2] == "close") {
+			if (w != nullptr) w->Close();
+		} else if (argv[2] != "status") {
+			if (w == nullptr) return false;
+			WidgetID widget;
+			if (argv[2] == "enable") widget = WID_R3_ENABLE;
+			else if (argv[2] == "size1") widget = WID_R3_SIZE_1;
+			else if (argv[2] == "size2") widget = WID_R3_SIZE_2;
+			else if (argv[2] == "size3") widget = WID_R3_SIZE_3;
+			else if (argv[2] == "size4") widget = WID_R3_SIZE_4;
+			else if (argv[2] == "colours") widget = WID_R3_COLOURS;
+			else if (argv[2] == "dither") widget = WID_R3_DITHER;
+			else return false;
+			w->OnClick({}, widget, 1);
+		}
+		const auto &gui = _settings_client.gui;
+		Debug(Facility::Driver, Severity::Error, "RETRO3D action={} panel={} enabled={} size={} colours={} dither={}", argv[2],
+			FindWindowById(WindowClass::Retro3D, 0) != nullptr, gui.renderer_3d_retro, gui.renderer_3d_pixel_size, gui.renderer_3d_retro_colours, gui.renderer_3d_retro_dither);
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "labels" && (argv[2] == "inspect" || argv[2] == "click")) {
+		CheckViewportLabels(argv[3], argv[2] == "click");
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "labeloptions") {
+		uint display = 0, facilities = 0;
+		if (std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), display).ec != std::errc{} || display > 255 ||
+			std::from_chars(argv[3].data(), argv[3].data() + argv[3].size(), facilities).ec != std::errc{} || facilities > 127) return false;
+		_display_opt = DisplayOptions{static_cast<uint8_t>(display)};
+		_facility_display_opt = StationFacilities{static_cast<uint8_t>(facilities)};
+		MarkWholeScreenDirty();
+		return true;
+	}
+	if (argv.size() == 2 && argv[1] == "fixturelabels") {
+		if (_networking || _game_mode != GameMode::Normal || !Company::IsValidID(_local_company)) return false;
+		AutoRestoreBackup company(_current_company, _local_company);
+		auto [result, id] = Command<Commands::PlaceSign>::Do(DoCommandFlag::Execute, TileXY(33, 27), "Phase 9.5b: slope sign");
+		for (Station *station : Station::Iterate()) if (Company::IsValidID(station->owner)) {
+			AutoRestoreBackup station_company(_current_company, station->owner);
+			Command<Commands::RenameStation>::Do(DoCommandFlag::Execute, station->index, "Phase9.5b Long Railway Terminal");
+			break;
+		}
+		Debug(Facility::Driver, Severity::Error, "PHASE95B FIXTURE ok={} sign={}", result.Succeeded(), id.base());
+		return result.Succeeded();
+	}
+	if (argv.size() == 2 && argv[1] == "labeleffects") {
+		int x = 29 * TILE_SIZE, y = 33 * TILE_SIZE, z = GetSlopePixelZ(x, y);
+		ShowCostOrIncomeAnimation(x, y, z, 12345);
+		ShowFeederIncomeAnimation(x + 48, y, GetSlopePixelZ(x + 48, y), 100, -200);
+		ShowFillingPercent(x, y + 64, GetSlopePixelZ(x, y + 64), 75, STR_PERCENT_UP);
+		return true;
+	}
+	if (argv.size() >= 3 && argv[1] == "toolbar") {
+		/* Explicit test driver: dispatch the real toolbar and keyboard handlers.
+		 * This verifies application events, not native OS mouse/DPI input. */
+		Window *w = FindWindowById(WindowClass::MainToolbar, 0);
+		if (w == nullptr || _game_mode != GameMode::Normal) return false;
+		if (argv.size() == 3 && argv[2] == "open") {
+			w->OnClick({}, WID_TN_3D, 1);
+		} else if (argv.size() == 3 && argv[2] == "switch") {
+			w->OnClick({}, WID_TN_SWITCH_BAR, 1);
+		} else if (argv.size() == 4 && argv[2] == "key") {
+			uint16_t key = argv[3] == "up" ? WKC_UP : argv[3] == "down" ? WKC_DOWN : argv[3] == "enter" ? WKC_RETURN : argv[3] == "escape" ? WKC_ESC : argv[3] == "menu" ? WKC_CTRL | WKC_ALT | '3' : 0;
+			if (key == 0) return false;
+			HandleKeypress(key, 0);
+		} else if (argv.size() == 5 && argv[2] == "resize") {
+			int width = 0, height = 0;
+			if (std::from_chars(argv[3].data(), argv[3].data() + argv[3].size(), width).ec != std::errc{} || std::from_chars(argv[4].data(), argv[4].data() + argv[4].size(), height).ec != std::errc{}) return false;
+			if (width < 640 || width > 3840 || height < 480 || height > 2160) return false;
+			VideoDriver::GetInstance()->ChangeResolution(width, height);
+		} else if ((argv.size() != 3 && argv.size() != 4) || argv[2] != "status") {
+			return false;
+		}
+		const auto *button = w->GetWidget<NWidgetCore>(WID_TN_3D);
+		Debug(Facility::Driver, Severity::Error, "PHASE95A supported={} enabled={} preference={} ground={} hints={} shadows={} classic={} menu={} help={} button={},{},{},{} screen={},{} action={} tag={}",
+			IsProof3DSupported(), IsProof3DEnabled(), _settings_client.gui.renderer_3d, _settings_client.gui.renderer_3d_ground_textures, _settings_client.gui.renderer_3d_camera_hints, _settings_client.gui.renderer_3d_shadows, IsTerrain3DCameraClassic(),
+			FindWindowById(WindowClass::DropdownMenu, 0) != nullptr, FindWindowById(WindowClass::Help, 1) != nullptr,
+			w->left + button->pos_x, w->top + button->pos_y, button->current_x, button->current_y, _screen.width, _screen.height, argv[2], argv.size() == 4 ? argv[3] : "-");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "verifylayer" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DLayerVerification(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "verifygpu" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DGPUVerification(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "verifydirty" && (argv[2] == "on" || argv[2] == "off")) {
+		SetTerrain3DVerification(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "instancestreams" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DInstanceStreams(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "staticinstances" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DStaticInstances(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "instancing" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DInstancing(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "lod" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DModelLOD(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "scoped" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DScopedInvalidation(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "partial" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DPartialRender(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "verifypartial" && (argv[2] == "on" || argv[2] == "off")) {
+		SetProof3DPartialVerification(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "performance" && (argv[2] == "baseline" || argv[2] == "cached" || argv[2] == "chunked" || argv[2] == "tilecached" || argv[2] == "eager" || argv[2] == "readback" || argv[2] == "optimized")) {
+		/* readback is optimized with the pre-priority-8 GPU read-back and CPU compositing. */
+		bool deferred = argv[2] == "readback" || argv[2] == "optimized";
+		SetProof3DPerformanceMode(argv[2] != "baseline", argv[2] == "chunked" || argv[2] == "tilecached" || argv[2] == "eager" || deferred, argv[2] == "tilecached" || argv[2] == "eager" || deferred, argv[2] == "eager" || deferred, deferred, argv[2] == "optimized"); return true;
+	}
+	if (argv.size() == 3 && argv[1] == "vehiclewindows") {
+		int count = 0;
+		auto parsed = std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), count);
+		if (parsed.ec != std::errc{} || parsed.ptr != argv[2].data() + argv[2].size() || count < 0 || count > 16) return false;
+		CloseWindowByClass(WindowClass::VehicleView);
+		for (const Vehicle *v : Vehicle::Iterate()) {
+			if (count == 0) break;
+			if (!v->IsPrimaryVehicle()) continue;
+			ShowVehicleViewWindow(v); --count;
+		}
+		return true;
+	}
+	if (argv.size() == 5 && argv[1] == "fixturetown") {
+		/* Phase 9.6 fixture preparation only, explicitly invoked in an isolated single-player save.
+		 * Use the same command as scenario editors/GameScripts; rendering never calls it. */
+		if (_networking || _game_mode != GameMode::Normal) return false;
+		std::array<int, 3> args{};
+		for (size_t i = 0; i < args.size(); ++i) {
+			auto text = argv[i + 2];
+			auto parsed = std::from_chars(text.data(), text.data() + text.size(), args[i]);
+			if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size()) return false;
+		}
+		if (args[0] < 0 || args[1] < 0 || args[0] >= int(Map::MaxX()) || args[1] >= int(Map::MaxY()) || args[2] < 1 || args[2] > 2000) return false;
+		Town *town = ClosestTownFromTile(TileXY(args[0], args[1]), UINT_MAX);
+		if (town == nullptr) return false;
+		uint before = town->cache.num_houses;
+		AutoRestoreBackup company(_current_company, OWNER_DEITY);
+		auto result = Command<Commands::ExpandTown>::Do(DoCommandFlag::Execute, town->index, args[2], {TownExpandMode::Buildings, TownExpandMode::Roads});
+		Debug(Facility::Driver, Severity::Error, "PHASE96 TOWN ok={} town={} x={} y={} houses_before={} houses_after={} population={}", result.Succeeded(), town->index.base(), TileX(town->xy), TileY(town->xy), before, town->cache.num_houses, town->cache.population);
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "visibility") {
+		int option = -1;
+		auto parsed = std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), option);
+		if (parsed.ec != std::errc{} || parsed.ptr != argv[2].data() + argv[2].size() || option < to_underlying(TransparencyOption::Signs) || option >= to_underlying(TransparencyOption::Invalid)) return false;
+		if (argv[3] != "solid" && argv[3] != "transparent" && argv[3] != "hidden") return false;
+		_transparency_opt.Set(static_cast<TransparencyOption>(option), argv[3] != "solid");
+		_invisibility_opt.Set(static_cast<TransparencyOption>(option), argv[3] == "hidden");
+		MarkWholeScreenDirty();
+		Debug(Facility::Driver, Severity::Error, "PHASE6 VISIBILITY option={} mode={}", option, argv[3]);
+		return true;
+	}
+	if (argv.size() == 2 && argv[1] == "previewclear") {
+		_thd.freeze=false; ResetObjectToPlace(); UpdateTileSelection(); MarkWholeScreenDirty(); return true;
+	}
+	if (argv.size() == 3 && argv[1] == "highlight" && argv[2] == "off") {
+		HighlightTerrain3D(-1,-1); return true;
+	}
+	if (argv.size() == 6 && argv[1] == "preview" && IsProof3DEnabled()) {
+		int coords[4];
+		for (int i=0;i<4;++i) {
+			auto value=argv[i+2];
+			if (std::from_chars(value.data(),value.data()+value.size(),coords[i]).ec!=std::errc{} || coords[i]<1 || coords[i]>=int(i%2?Map::MaxY():Map::MaxX())) return false;
+		}
+		_thd.freeze=false; ResetObjectToPlace();
+		_thd.place_mode=HT_RAIL; _thd.drawstyle=HT_RAIL;
+		VpStartPlaceSizing(TileXY(coords[0],coords[1]),VPM_RAILDIRS,DDSP_PLACE_RAIL);
+		VpSelectTilesWithMethod(coords[2]*TILE_SIZE+8,coords[3]*TILE_SIZE+8,VPM_RAILDIRS);
+		UpdateTileSelection();
+		_thd.freeze=true;
+		MarkWholeScreenDirty();
+		Debug(Facility::Driver, Severity::Error,"3D preview through original rail selection: style={} origin={},{} size={},{}",int(_thd.drawstyle),_thd.pos.x,_thd.pos.y,_thd.size.x,_thd.size.y);
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "fastforward" && (argv[2] == "on" || argv[2] == "off")) {
+		ChangeGameSpeed(argv[2] == "on");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "wireframe" && (argv[2] == "on" || argv[2] == "off")) {
+		SetTerrain3DWireframe(argv[2] == "on"); return true;
+	}
+	if (argv.size() == 3 && argv[1] == "ground" && (argv[2] == "on" || argv[2] == "off")) {
+		SetTerrain3DGroundTextures(argv[2] == "on");
+		IConsolePrint(CC_INFO, argv[2] == "on" ? "3D ground textures requested; flat colours remain if the driver cannot create them." : "3D ground uses flat colours.");
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "shadows" && (argv[2] == "off" || argv[2] == "contact" || argv[2] == "sun")) {
+		/* The saved preference, as the 3D menu sets it. */
+		SetSettingValue(GetSettingFromName("gui.renderer_3d_shadows")->AsIntSetting(), argv[2] == "off" ? 0 : argv[2] == "contact" ? 1 : 2);
+		IConsolePrint(CC_INFO, "3D shadows: {} (drawn: {}).", argv[2], GetTerrain3DShadows());
+		return true;
+	}
+	if (argv.size() == 2 && argv[1] == "shadowstats") {
+		Debug(Facility::Driver, Severity::Error, "PHASE95C {}", GetTerrain3DShadowStats());
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "managecheck" && IsProof3DEnabled()) {
+		CheckTerrain3DManagement(argv[2]);
+		CheckViewportManagement(argv[2]);
+		return true;
+	}
+	if (argv.size() == 8 && argv[1] == "managetool" && IsProof3DEnabled() && !_networking && _game_mode == GameMode::Normal && Company::IsValidID(_local_company)) {
+		/* Isolated-fixture diagnostics only: application callbacks, no native input.
+		 * Check projected anchors through the real inverse before dispatching a tool.
+		 * Commands remain entirely in the existing construction GUI callbacks. */
+		const auto tool = argv[2], mode = argv[3];
+		if (mode != "build" && mode != "remove" && mode != "preview" && mode != "escape" && mode != "cancel") return false;
+		std::array<int, 4> coords{};
+		for (size_t i = 0; i < coords.size(); ++i) {
+			auto value = argv[i + 4];
+			auto parsed = std::from_chars(value.data(), value.data() + value.size(), coords[i]);
+			if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || coords[i] < 1 || coords[i] >= int(i % 2 ? Map::MaxY() : Map::MaxX())) return false;
+		}
+		auto *main = GetMainWindow();
+		if (main == nullptr || main->viewport == nullptr) return false;
+		const auto &vp = *main->viewport;
+		auto picked = [&](int tx, int ty) {
+			int wx = tx * TILE_SIZE + 7, wy = ty * TILE_SIZE + 7;
+			Point p = ProjectTerrain3DLabel(vp, wx, wy, GetSlopePixelZ(wx, wy));
+			return TranslateXYToTileCoord(vp, vp.left + UnScaleByZoom(p.x - (vp.virtual_left & ScaleByZoom(-1, vp.zoom)), vp.zoom),
+				vp.top + UnScaleByZoom(p.y - (vp.virtual_top & ScaleByZoom(-1, vp.zoom)), vp.zoom));
+		};
+		Point a = picked(coords[0], coords[1]), b = picked(coords[2], coords[3]);
+		if (a.x < 0 || b.x < 0 || TileVirtXY(a.x, a.y) != TileXY(coords[0], coords[1]) || TileVirtXY(b.x, b.y) != TileXY(coords[2], coords[3])) {
+			Debug(Facility::Driver, Severity::Error, "PHASE95E TOOL tool={} mode={} ok=false", tool, mode);
+			return true;
+		}
+		bool road = tool == "roadx" || tool == "roady" || tool == "roaddepot";
+		bool terraform = tool == "raise" || tool == "lower" || tool == "level" || tool == "demolish";
+		bool single = tool == "raildepot" || tool == "roaddepot" || tool == "tunnel";
+		WidgetID widget;
+		if (tool == "roadx") widget = WID_ROT_ROAD_X;
+		else if (tool == "roady") widget = WID_ROT_ROAD_Y;
+		else if (tool == "roaddepot") widget = WID_ROT_DEPOT;
+		else if (tool == "raildepot") widget = WID_RAT_BUILD_DEPOT;
+		else if (tool == "station") widget = WID_RAT_BUILD_STATION;
+		else if (tool == "signal") widget = WID_RAT_BUILD_SIGNALS;
+		else if (tool == "bridge") widget = WID_RAT_BUILD_BRIDGE;
+		else if (tool == "tunnel") widget = WID_RAT_BUILD_TUNNEL;
+		else if (tool == "raise") widget = WID_TT_RAISE_LAND;
+		else if (tool == "lower") widget = WID_TT_LOWER_LAND;
+		else if (tool == "level") widget = WID_TT_LEVEL_LAND;
+		else if (tool == "demolish") widget = WID_TT_DEMOLISH;
+		else return false;
+		if ((single || terraform || tool == "bridge") && mode == "remove") return false;
+		_thd.freeze = false;
+		ResetObjectToPlace();
+		Window *toolbar = terraform ? ShowTerraformToolbar() : road ? ShowBuildRoadToolbar(ROADTYPE_ROAD) : ShowBuildRailToolbar(RAILTYPE_RAIL);
+		if (toolbar == nullptr) return false;
+		toolbar->OnClick({}, widget, 1);
+		if (mode == "remove") toolbar->OnClick({}, road ? WidgetID(WID_ROT_REMOVE) : WidgetID(WID_RAT_REMOVE), 1);
+		AutoRestoreBackup company(_current_company, _local_company);
+		AutoRestoreBackup ctrl(_ctrl_pressed, false);
+		AutoRestoreBackup in_window(_cursor.in_window, true);
+		AutoRestoreBackup pointer(_cursor.pos, Point{vp.left + vp.width / 2, vp.top + vp.height / 2});
+		_tile_fract_coords = {a.x & TILE_UNIT_MASK, a.y & TILE_UNIT_MASK};
+		if (!single || mode == "build") toolbar->OnPlaceObject(a, TileVirtXY(a.x, a.y));
+		if (!single) {
+			toolbar->OnPlaceDrag(_thd.select_method, _thd.select_proc, b);
+			_special_mouse_mode = SpecialMouseMode::None;
+			UpdateTileSelection();
+			_thd.freeze = true;
+			if (mode == "build" || mode == "remove") {
+				toolbar->OnPlaceMouseUp(_thd.select_method, _thd.select_proc, _thd.selend, TileVirtXY(_thd.selstart.x, _thd.selstart.y), TileVirtXY(_thd.selend.x, _thd.selend.y));
+				if (tool == "bridge") if (auto *picker = FindWindowById(WindowClass::BuildBridge, TransportType::Rail)) picker->OnKeyPress('1', '1');
+			}
+		}
+		if (mode == "escape" || mode == "cancel") {
+			_thd.freeze = false;
+			if (mode == "escape") HandleKeypress(WKC_ESC, 0);
+			else ResetObjectToPlace();
+			UpdateTileSelection();
+		}
+		MarkWholeScreenDirty();
+		Debug(Facility::Driver, Severity::Error, "PHASE95E TOOL tool={} mode={} ok=true active={} classic={}", tool, mode, int(_thd.place_mode), IsTerrain3DCameraClassic());
+		return true;
+	}
+	if (argv.size() == 5 && argv[1] == "managestate" && !_networking && _game_mode == GameMode::Normal) {
+		std::array<int, 2> coords{};
+		for (size_t i = 0; i < coords.size(); ++i) {
+			auto value = argv[i + 3];
+			auto parsed = std::from_chars(value.data(), value.data() + value.size(), coords[i]);
+			if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || coords[i] < 1 || coords[i] >= int(i ? Map::MaxY() : Map::MaxX())) return false;
+		}
+		TileIndex tile = TileXY(coords[0], coords[1]);
+		bool bridge = IsBridgeTile(tile), tunnel = IsTunnelTile(tile);
+		TileIndex other = bridge || tunnel ? GetOtherTunnelBridgeEnd(tile) : tile;
+		Debug(Facility::Driver, Severity::Error, "PHASE95E STATE tag={} tile={},{} type={} height={} rail={} road={} raildepot={} roaddepot={} station={} signal={} bridge={} tunnel={} other={},{} active={}",
+			argv[2], coords[0], coords[1], int(to_underlying(GetTileType(tile))), TileHeight(tile), IsPlainRailTile(tile) ? int(GetTrackBits(tile).base()) : 0,
+			IsNormalRoadTile(tile) ? int(GetAllRoadBits(tile).base()) : 0, IsRailDepotTile(tile), IsRoadDepotTile(tile), IsRailStationTile(tile),
+			IsPlainRailTile(tile) && HasSignals(tile), bridge, tunnel, TileX(other), TileY(other), int(_thd.place_mode));
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "managezoom" && IsProof3DEnabled()) {
+		std::array<int, 2> coords{};
+		for (size_t i = 0; i < coords.size(); ++i) {
+			auto value = argv[i + 2];
+			auto parsed = std::from_chars(value.data(), value.data() + value.size(), coords[i]);
+			if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || coords[i] < 1 || coords[i] >= int(i ? Map::MaxY() : Map::MaxX())) return false;
+		}
+		auto *main = GetMainWindow();
+		if (main == nullptr || main->viewport == nullptr) return false;
+		auto &vp = *main->viewport;
+		int wx = coords[0] * TILE_SIZE + 7, wy = coords[1] * TILE_SIZE + 7;
+		Point anchor = ProjectTerrain3DLabel(vp, wx, wy, GetSlopePixelZ(wx, wy));
+		Point at{vp.left + UnScaleByZoom(anchor.x - (vp.virtual_left & ScaleByZoom(-1, vp.zoom)), vp.zoom),
+			vp.top + UnScaleByZoom(anchor.y - (vp.virtual_top & ScaleByZoom(-1, vp.zoom)), vp.zoom)};
+		AutoRestoreBackup cursor(_cursor.pos, at);
+		Point before = GetTileBelowCursor();
+		for (bool in : {true, false}) {
+			ZoomInOrOutToCursorWindow(in, main);
+			Point after = GetTileBelowCursor();
+			bool ok = before.x >= 0 && after.x >= 0 && TileVirtXY(before.x, before.y) == TileVirtXY(after.x, after.y);
+			Debug(Facility::Driver, Severity::Error, "PHASE95E ZOOM in={} before={},{} after={},{} ok={}", in, before.x, before.y, after.x, after.y, ok);
+		}
+		return true;
+	}
+	if (argv.size() == 7 && argv[1] == "managedrag" && IsProof3DEnabled() && !_networking) {
+		/* Explicit isolated-fixture input: project requested world anchors, then use
+		 * the same inverse and construction callbacks as the application mouse path. */
+		if (argv[2] != "preview" && argv[2] != "build" && argv[2] != "remove" && argv[2] != "cancel" && argv[2] != "area" && argv[2] != "diagonal") return false;
+		std::array<int, 4> coords{};
+		for (size_t i = 0; i < coords.size(); ++i) {
+			auto value = argv[i + 3];
+			auto parsed = std::from_chars(value.data(), value.data() + value.size(), coords[i]);
+			if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || coords[i] < 1 || coords[i] >= int(i % 2 ? Map::MaxY() : Map::MaxX())) return false;
+		}
+		auto *main = GetMainWindow();
+		if (main == nullptr || main->viewport == nullptr) return false;
+		const auto &vp = *main->viewport;
+		auto picked = [&](int tx, int ty) {
+			int wx = tx * TILE_SIZE + 8, wy = ty * TILE_SIZE + 8;
+			Point p = ProjectTerrain3DLabel(vp, wx, wy, GetSlopePixelZ(wx, wy));
+			return TranslateXYToTileCoord(vp, vp.left + UnScaleByZoom(p.x - (vp.virtual_left & ScaleByZoom(-1, vp.zoom)), vp.zoom),
+				vp.top + UnScaleByZoom(p.y - (vp.virtual_top & ScaleByZoom(-1, vp.zoom)), vp.zoom));
+		};
+		Point a = picked(coords[0], coords[1]), b = picked(coords[2], coords[3]);
+		bool ok = a.x >= 0 && b.x >= 0 && TileVirtXY(a.x, a.y) == TileXY(coords[0], coords[1]) && TileVirtXY(b.x, b.y) == TileXY(coords[2], coords[3]);
+		if (!ok) { Debug(Facility::Driver, Severity::Error, "PHASE95E DRAG mode={} ok=false hit={},{},{},{}", argv[2], a.x, a.y, b.x, b.y); return true; }
+		_thd.freeze = false;
+		ResetObjectToPlace();
+		Window *toolbar = ShowBuildRailToolbar(RAILTYPE_RAIL);
+		bool area = argv[2] == "area" || argv[2] == "diagonal";
+		toolbar->OnClick({}, area ? WID_RAT_DEMOLISH : WID_RAT_AUTORAIL, 1);
+		if (argv[2] == "remove") toolbar->OnClick({}, WID_RAT_REMOVE, 1);
+		AutoRestoreBackup ctrl(_ctrl_pressed, argv[2] == "diagonal");
+		AutoRestoreBackup left(_left_button_down, argv[2] == "diagonal");
+		/* Exercise the application's tooltip gate in this hidden fixture. These
+		 * scoped cursor values never inject OS input or change the user's cursor. */
+		AutoRestoreBackup in_window(_cursor.in_window, true);
+		AutoRestoreBackup pointer(_cursor.pos, Point{vp.left + vp.width / 2, vp.top + vp.height / 2});
+		_tile_fract_coords = {a.x & TILE_UNIT_MASK, a.y & TILE_UNIT_MASK};
+		toolbar->OnPlaceObject(a, TileVirtXY(a.x, a.y));
+		toolbar->OnPlaceDrag(_thd.select_method, _thd.select_proc, b);
+		/* A scripted preview has no held native mouse button. Prevent the ordinary
+		 * sizing loop from treating the next frame as a release and building it. */
+		_special_mouse_mode = SpecialMouseMode::None;
+		UpdateTileSelection();
+		_thd.freeze = true;
+		if (argv[2] == "cancel") { _thd.freeze = false; ResetObjectToPlace(); UpdateTileSelection(); }
+		if (argv[2] == "build" || argv[2] == "remove") {
+			AutoRestoreBackup company(_current_company, _local_company);
+			toolbar->OnPlaceMouseUp(_thd.select_method, _thd.select_proc, _thd.selend, TileVirtXY(_thd.selstart.x, _thd.selstart.y), TileVirtXY(_thd.selend.x, _thd.selend.y));
+		}
+		MarkWholeScreenDirty();
+		Debug(Facility::Driver, Severity::Error, "PHASE95E DRAG mode={} ok=true style={} start={},{} end={},{} tool={} classic={} tooltip={} diagonal={}", argv[2], int(_thd.drawstyle), _thd.selstart.x, _thd.selstart.y, _thd.selend.x, _thd.selend.y, int(_thd.place_mode), IsTerrain3DCameraClassic(), FindWindowById(WindowClass::ToolTips, 0) != nullptr, _thd.diagonal);
+		return true;
+	}
+	if (argv.size() == 6 && argv[1] == "manageresult" && !_networking) {
+		std::array<int, 3> values{};
+		for (size_t i = 0; i < values.size(); ++i) {
+			auto value = argv[i + 3];
+			auto parsed = std::from_chars(value.data(), value.data() + value.size(), values[i]);
+			if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) return false;
+		}
+		if (values[0] < 1 || values[1] < 1 || values[0] >= int(Map::MaxX()) || values[1] >= int(Map::MaxY())) return false;
+		TileIndex tile = TileXY(values[0], values[1]);
+		int bits = IsPlainRailTile(tile) ? int(GetTrackBits(tile).base()) : 0;
+		Debug(Facility::Driver, Severity::Error, "PHASE95E RESULT tag={} tile={},{} expected={} actual={} ok={}", argv[2], values[0], values[1], values[2], bits, values[2] == bits);
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "focusstats") {
+		CheckTerrain3DVisibility(argv[2]);
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "visibilitylock") {
+		int option = -1;
+		auto parsed = std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), option);
+		if (parsed.ec != std::errc{} || parsed.ptr != argv[2].data() + argv[2].size() || option < to_underlying(TransparencyOption::Signs) || option >= to_underlying(TransparencyOption::Invalid)) return false;
+		if (argv[3] != "on" && argv[3] != "off") return false;
+		_transparency_lock.Set(static_cast<TransparencyOption>(option), argv[3] == "on");
+		MarkWholeScreenDirty();
+		return true;
+	}
+	if (argv.size() == 4 && (argv[1] == "pick" || argv[1] == "clickraise" || argv[1] == "clickrail" || argv[1] == "clickremove") && IsProof3DEnabled()) {
+		int x = -1, y = -1;
+		if (std::from_chars(argv[2].data(), argv[2].data()+argv[2].size(), x).ec != std::errc{} || std::from_chars(argv[3].data(), argv[3].data()+argv[3].size(), y).ec != std::errc{}) return false;
+		auto *w = GetMainWindow();
+		if (w == nullptr || w->viewport == nullptr) return false;
+		Point hit = TranslateXYToTileCoord(*w->viewport, x, y);
+		if (hit.x < 0 || hit.y < 0) { IConsolePrint(CC_INFO, "3D pick: outside terrain"); return true; }
+		int tx=hit.x/TILE_SIZE, ty=hit.y/TILE_SIZE;
+		HighlightTerrain3D(tx,ty);
+		Debug(Facility::Driver, Severity::Error,"3D screen pick {},{} -> tile {},{}",x,y,tx,ty);
+		if (argv[1] == "clickrail" || argv[1] == "clickremove") {
+			AutoRestoreBackup company(_current_company,_local_company);
+			TileIndex tile=TileXY(tx,ty);
+			bool ok=argv[1]=="clickrail" ? Command<Commands::BuildRail>::Post(tile,RAILTYPE_RAIL,Track::X,false) : Command<Commands::RemoveRail>::Post(tile,Track::X);
+			Debug(Facility::Driver, Severity::Error,"3D picked {}: accepted={} authoritative track bits={}",argv[1],ok,int((IsPlainRailTile(tile)?GetTrackBits(tile):TrackBits{}).base()));
+		}
+		if (argv[1] == "clickraise") {
+			AutoRestoreBackup company(_current_company, _local_company);
+			int before=TileHeight(TileXY(tx,ty));
+			bool ok=Command<Commands::TerraformLand>::Post(TileXY(tx,ty),SLOPE_N,true);
+			Debug(Facility::Driver, Severity::Error,"3D picked terraform: accepted={} north height {} -> {}",ok,before,TileHeight(TileXY(tx,ty)));
+		}
+		return true;
+	}
+	if (argv.size() == 2 && argv[1] == "coverage" && IsProof3DEnabled()) {
+		IConsolePrint(CC_INFO, AuditCoverage3D()); return true;
+	}
+	if (argv.size() == 2 && argv[1] == "assets" && IsProof3DEnabled()) {
+		IConsolePrint(CC_INFO, AuditAssets3D());
+		return true;
+	}
+	if (argv.size() == 2 && argv[1] == "infrastructure" && IsProof3DEnabled()) {
+		IConsolePrint(CC_INFO, AuditInfrastructure3D());
+		return true;
+	}
+	if (argv.size() == 2 && argv[1] == "check" && IsProof3DEnabled()) {
+		if (auto *w = GetMainWindow(); w != nullptr && w->viewport != nullptr) IConsolePrint(CC_INFO, CheckTerrain3D(*w->viewport));
+		return true;
+	}
+	if (argv.size() == 4 && (argv[1] == "inspect" || argv[1] == "highlight" || argv[1] == "raise" || argv[1] == "lower")) {
+		int x = -1, y = -1;
+		if (std::from_chars(argv[2].data(), argv[2].data()+argv[2].size(), x).ec != std::errc{} || std::from_chars(argv[3].data(), argv[3].data()+argv[3].size(), y).ec != std::errc{}) return false;
+		if (x < 1 || y < 1 || x >= int(Map::MaxX()) || y >= int(Map::MaxY())) return false;
+		if (argv[1] == "inspect") {
+			Debug(Facility::Driver, Severity::Error,"3D inspect tile {},{}: north height={} slope={}",x,y,TileHeight(TileXY(x,y)),int(GetTileSlope(TileXY(x,y))));
+			return true;
+		}
+		HighlightTerrain3D(x, y);
+		if (argv[1] != "highlight") {
+			AutoRestoreBackup company(_current_company, _local_company);
+			int before=TileHeight(TileXY(x,y));
+			bool ok = Command<Commands::TerraformLand>::Post(TileXY(x,y), SLOPE_N, argv[1] == "raise");
+			Debug(Facility::Driver, Severity::Error, "3D terrain {} {},{}: command accepted={} north height {} -> {}", argv[1], x, y, ok,before,TileHeight(TileXY(x,y)));
+		}
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "camera") {
+		int yaw = 0, tilt = 100;
+		if (std::from_chars(argv[2].data(), argv[2].data()+argv[2].size(), yaw).ec != std::errc{} || std::from_chars(argv[3].data(), argv[3].data()+argv[3].size(), tilt).ec != std::errc{}) return false;
+		SetTerrain3DCamera(yaw, tilt); return true;
+	}
+	if (argv.size() == 3 && argv[1] == "follow") {
+		/* Art review: stop the first vehicle consist containing the given engine (or wagon) and centre the main view on it.
+		 * The view does not keep following: the rotated 3D camera pivots about the classic centre. */
+		int engine = -1;
+		if (std::from_chars(argv[2].data(), argv[2].data()+argv[2].size(), engine).ec != std::errc{}) return false;
+		for (const Vehicle *part : Vehicle::Iterate()) {
+			if (part->engine_type != EngineID(engine) || !part->First()->IsFrontEngine()) continue;
+			const Vehicle *v = part->First();
+			if (!v->vehstatus.Test(VehState::Stopped)) {
+				AutoRestoreBackup company(_current_company, v->owner);
+				Command<Commands::StartStopVehicle>::Do(DoCommandFlag::Execute, v->index, false);
+			}
+			ScrollMainWindowTo(part->x_pos, part->y_pos, part->z_pos, true);
+			IConsolePrint(CC_INFO, "Stopped and centred vehicle {} at tile {},{}.", v->unitnumber, TileX(v->tile), TileY(v->tile));
+			return true;
+		}
+		IConsolePrint(CC_INFO, "No vehicle uses engine {}.", engine);
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "orbit" && IsProof3DEnabled()) {
+		int yaw = 0, tilt = 0;
+		if (std::from_chars(argv[2].data(), argv[2].data()+argv[2].size(), yaw).ec != std::errc{} || std::from_chars(argv[3].data(), argv[3].data()+argv[3].size(), tilt).ec != std::errc{}) return false;
+		OrbitTerrain3DCamera(static_cast<float>(yaw), static_cast<float>(tilt), true); return true;
+	}
+	if (argv.size() == 2 && argv[1] == "home" && IsProof3DEnabled()) {
+		ToggleTerrain3DCamera(); return true;
+	}
+	if (argv.size() >= 3 && argv[1] == "queued") {
+		/* Test scripts: console screenshots are taken later on the main thread, so run this after the ones already requested. */
+		std::string command = "renderer_3d";
+		for (std::string_view arg : argv.subspan(2)) command += fmt::format(" {}", arg);
+		VideoDriver::GetInstance()->QueueOnMainThread([command] { IConsoleCmdExec(command); });
+		return true;
+	}
+	if (argv.size() >= 4 && argv[1] == "after") {
+		/* Test scripts: run any console command after this many drawn frames, also while paused or across a load. */
+		int frames = 0;
+		auto parsed = std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), frames);
+		if (parsed.ec != std::errc{} || parsed.ptr != argv[2].data() + argv[2].size() || frames < 0) return false;
+		std::string command;
+		for (std::string_view arg : argv.subspan(3)) command += fmt::format("{}{}", command.empty() ? "" : " ", arg);
+		struct Later {
+			int frames;
+			std::string command;
+			void operator()() const
+			{
+				if (frames == 0) { IConsoleCmdExec(command); return; }
+				VideoDriver::GetInstance()->QueueOnMainThread(Later{frames - 1, command});
+			}
+		};
+		VideoDriver::GetInstance()->QueueOnMainThread(Later{frames, command});
+		return true;
+	}
+	/* Phase 9: drive vehicle windows' own cameras from test scripts. The target is a vehicle id or the first vehicle
+	 * of a type (train, road, ship or aircraft), whose window opens if needed, or all open vehicle windows; false is a
+	 * malformed target. */
+	auto camera_windows = [](std::string_view target, auto &&apply) {
+		bool all = target == "all";
+		uint32_t id = 0;
+		if (!all) {
+			static const std::array<std::string_view, 4> types{"train", "road", "ship", "aircraft"};
+			auto type = std::find(types.begin(), types.end(), target);
+			if (type != types.end()) {
+				id = VehicleID::Invalid().base();
+				for (const Vehicle *v : Vehicle::Iterate()) {
+					if (v->IsPrimaryVehicle() && v->type == static_cast<VehicleType>(type - types.begin())) { id = v->index.base(); break; }
+				}
+			} else if (std::from_chars(target.data(), target.data() + target.size(), id).ec != std::errc{}) {
+				return false;
+			}
+			const Vehicle *v = Vehicle::GetIfValid(VehicleID(id));
+			if (v == nullptr || !v->IsPrimaryVehicle()) { IConsolePrint(CC_ERROR, "No primary vehicle {}.", target); return true; }
+			ShowVehicleViewWindow(v);
+		}
+		int changed = 0;
+		for (Window *w : Window::Iterate()) {
+			if (w->window_class != WindowClass::VehicleView || w->viewport == nullptr || (!all && static_cast<int32_t>(w->window_number) != static_cast<int32_t>(id))) continue;
+			w->viewport->camera_vehicle = VehicleID(static_cast<uint32_t>(w->window_number));
+			apply(*w->viewport, *Vehicle::Get(w->viewport->camera_vehicle));
+			w->SetDirty();
+			++changed;
+		}
+		IConsolePrint(CC_INFO, "{} vehicle window(s) changed camera.", changed);
+		Debug(Facility::Driver, Severity::Error, "PHASE9 TARGET target={} windows={}", target, changed);
+		return true;
+	};
+	auto log_view = [](const Viewport &vp, std::string_view camera) {
+		Point hit = TranslateXYToTileCoord(vp, vp.left + vp.width / 2, vp.top + vp.height / 2);
+		/* Underground: below the ground under it, as in a tunnel, where 9.5 fades the view out. */
+		const Vehicle *v = Vehicle::GetIfValid(vp.camera_vehicle);
+		bool underground = v != nullptr && v->z_pos + 4 < GetSlopePixelZOutsideMap(v->x_pos, v->y_pos);
+		Debug(Facility::Driver, Severity::Error, "PHASE9 VIEW vehicle={} camera={} viewport={},{},{},{} centre_pick={},{} pitch={} underground={} dark={}", vp.camera_vehicle.base(), camera, vp.left, vp.top, vp.width, vp.height, hit.x, hit.y, vp.camera_eye[4], underground, vp.camera_dark);
+	};
+	if (argv.size() == 2 && argv[1] == "views" && IsProof3DEnabled()) {
+		/* Test scripts: log every vehicle window's camera without changing it. */
+		static const std::array<std::string_view, 4> names{"normal", "cab", "chase", "fixed"};
+		for (const Window *w : Window::Iterate()) {
+			if (w->window_class == WindowClass::VehicleView && w->viewport != nullptr) log_view(*w->viewport, names[static_cast<int>(w->viewport->camera_3d)]);
+		}
+		/* Any other view with a camera of its own, or still naming a vehicle (9.5: none outlives its vehicle). */
+		for (const Window *w : Window::Iterate()) {
+			if (w->window_class == WindowClass::VehicleView || w->viewport == nullptr) continue;
+			const Viewport &vp = *w->viewport;
+			if (vp.camera_3d == ViewportCamera3D::Normal && vp.camera_vehicle == VehicleID::Invalid()) continue;
+			Debug(Facility::Driver, Severity::Error, "PHASE9 OTHERVIEW class={} vehicle={} valid={} camera={}", static_cast<int>(w->window_class), vp.camera_vehicle.base(), Vehicle::IsValidID(vp.camera_vehicle), names[static_cast<int>(vp.camera_3d)]);
+		}
+		return true;
+	}
+	if (argv.size() >= 5 && argv[1] == "onride") {
+		/* Test scripts (Phase 9.5): run a console command once, the first time a ride-along view of this vehicle (or any)
+		 * sees the event: entering, black, leaving or clear in a tunnel, snapback, takeoff, landing, helitakeoff,
+		 * helilanding, holding, overtaking or turning (a road vehicle turning round). Every event is logged from then on. */
+		std::string command;
+		for (std::string_view arg : argv.subspan(4)) command += fmt::format("{}{}", command.empty() ? "" : " ", arg);
+		static std::vector<std::array<std::string, 3>> waiting;
+		waiting.push_back({std::string(argv[2]), std::string(argv[3]), command});
+		SetViewportCamera3DEventHook([](VehicleID vehicle, std::string_view event, float dark) {
+			Debug(Facility::Driver, Severity::Error, "PHASE9 EVENT vehicle={} event={} dark={} tick={}", vehicle.base(), event, dark, TimerGameTick::counter);
+			for (auto it = waiting.begin(); it != waiting.end();) {
+				if ((*it)[1] != event || ((*it)[0] != "any" && (*it)[0] != fmt::format("{}", vehicle.base()))) { ++it; continue; }
+				VideoDriver::GetInstance()->QueueOnMainThread([command = (*it)[2]] { IConsoleCmdExec(command); });
+				it = waiting.erase(it);
+			}
+		});
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "ride" && IsProof3DEnabled() && !_networking) {
+		/* Test scripts (Phase 9.5): drive a ride-along view's edge cases with the vehicle's own commands, run for its owner
+		 * as an AI's would be, or crash it. Single player only. */
+		uint32_t id = 0;
+		if (std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), id).ec != std::errc{}) return false;
+		Vehicle *v = Vehicle::GetIfValid(VehicleID(id));
+		if (v == nullptr || !v->IsPrimaryVehicle()) { IConsolePrint(CC_ERROR, "No primary vehicle {}.", argv[2]); return true; }
+		std::string_view action = argv[3];
+		Backup<CompanyID> cur_company(_current_company, v->owner);
+		CommandCost result;
+		if (action == "depot") {
+			result = Command<Commands::SendVehicleToDepot>::Do(DoCommandFlag::Execute, v->index, {}, {});
+		} else if (action == "stop" || action == "start") {
+			if (v->vehstatus.Test(VehState::Stopped) != (action == "start")) { cur_company.Restore(); return true; }
+			result = Command<Commands::StartStopVehicle>::Do(DoCommandFlag::Execute, v->index, false);
+		} else if (action == "turn" && v->type == VehicleType::Road) {
+			result = Command<Commands::TurnRoadVehicle>::Do(DoCommandFlag::Execute, v->index);
+		} else if (action == "reverse" && v->type == VehicleType::Train) {
+			result = Command<Commands::ReverseTrainDirection>::Do(DoCommandFlag::Execute, v->index, false);
+		} else if (action == "sell") {
+			result = Command<Commands::SellVehicle>::Do(DoCommandFlag::Execute, v->index, true, false, ClientID::Invalid);
+		} else if (action == "crash") {
+			v->Crash();
+		} else if (action == "extra") {
+			/* An extra viewport window chasing the vehicle, which no vehicle window owns. */
+			ShowExtraViewportWindow(v->tile);
+			for (Window *w : Window::IterateFromFront()) {
+				if (w->window_class != WindowClass::ExtraViewport || w->viewport == nullptr) continue;
+				w->viewport->camera_vehicle = v->index;
+				w->viewport->camera_3d = ViewportCamera3D::Chase;
+				w->viewport->camera_follow_set = false;
+				w->SetDirty();
+				break;
+			}
+		} else {
+			cur_company.Restore();
+			return false;
+		}
+		cur_company.Restore();
+		Debug(Facility::Driver, Severity::Error, "PHASE9 RIDE vehicle={} action={} ok={}", id, action, result.Succeeded());
+		return true;
+	}
+	if (argv.size() == 4 && argv[1] == "view" && IsProof3DEnabled()) {
+		if (argv[3] != "normal" && argv[3] != "cab" && argv[3] != "chase") return false;
+		auto mode = argv[3] == "cab" ? ViewportCamera3D::Cab : argv[3] == "chase" ? ViewportCamera3D::Chase : ViewportCamera3D::Normal;
+		return camera_windows(argv[2], [&](Viewport &vp, const Vehicle &) {
+			vp.camera_3d = mode;
+			vp.camera_follow_set = false;
+			log_view(vp, argv[3]);
+		});
+	}
+	if (argv.size() == 4 && argv[1] == "press" && IsProof3DEnabled() && (argv[3] == "button" || argv[3] == "hotkey")) {
+		/* Test scripts: the camera button of a vehicle window or of all of them, clicked or by its hotkey sent through the
+		 * normal key dispatch to the front window. Windows come to the front from the back, so their order is kept. */
+		std::vector<WindowNumber> numbers;
+		for (const Window *w : Window::Iterate()) {
+			if (w->window_class == WindowClass::VehicleView && (argv[2] == "all" || fmt::format("{}", static_cast<int32_t>(w->window_number)) == argv[2])) numbers.push_back(w->window_number);
+		}
+		for (WindowNumber number : numbers) {
+			Window *w = BringWindowToFrontById(WindowClass::VehicleView, number);
+			if (w == nullptr || w->viewport == nullptr) continue;
+			if (argv[3] == "button") {
+				w->OnClick({}, WID_VV_CAMERA, 1);
+			} else {
+				HandleKeypress('V', 'v');
+			}
+			Debug(Facility::Driver, Severity::Error, "PHASE9 PRESS vehicle={} by={} camera={}", static_cast<int32_t>(number), argv[3], static_cast<int>(w->viewport->camera_3d));
+		}
+		if (numbers.empty()) IConsolePrint(CC_ERROR, "No vehicle window {}.", argv[2]);
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "chaselog" && (argv[2] == "on" || argv[2] == "off")) {
+		SetViewportCamera3DLog(argv[2] == "on"); return true;
+	}
+	if (argv.size() == 5 && argv[1] == "windowsize") {
+		/* Test scripts: as if the player dragged every vehicle window to this size. */
+		int width = 0, height = 0;
+		if (std::from_chars(argv[3].data(), argv[3].data() + argv[3].size(), width).ec != std::errc{} || std::from_chars(argv[4].data(), argv[4].data() + argv[4].size(), height).ec != std::errc{}) return false;
+		bool all = argv[2] == "all";
+		for (Window *w : Window::Iterate()) {
+			if (w->window_class != WindowClass::VehicleView || (!all && fmt::format("{}", static_cast<int32_t>(w->window_number)) != argv[2])) continue;
+			int step_x = std::max(1U, w->nested_root->resize_x), step_y = std::max(1U, w->nested_root->resize_y);
+			ResizeWindow(w, (width - w->width) / step_x * step_x, (height - w->height) / step_y * step_y, true, false);
+			Debug(Facility::Driver, Severity::Error, "PHASE9 WINDOW vehicle={} size={}x{} viewport={}x{} at={},{}", static_cast<int32_t>(w->window_number), w->width, w->height, w->viewport->width, w->viewport->height, w->viewport->left, w->viewport->top);
+		}
+		return true;
+	}
+	if ((argv.size() == 8 || argv.size() == 9) && argv[1] == "eye" && IsProof3DEnabled()) {
+		/* Phase 9.2: a still perspective camera, placed from where each vehicle is now. */
+		auto parse = [](std::string_view text, float &value) {
+			auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+			return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+		};
+		std::array<float, 5> values{}; // Tiles along x and y, height above the ground, heading and pitch.
+		float fov = 60;
+		bool ahead = argv[6] == "ahead";
+		for (size_t i = 0; i < values.size(); ++i) if (!(i == 3 && ahead) && !parse(argv[3 + i], values[i])) return false;
+		if (argv.size() == 9 && (!parse(argv[8], fov) || fov < 10 || fov > 120)) return false;
+		return camera_windows(argv[2], [&](Viewport &vp, const Vehicle &v) {
+			float x = v.x_pos + values[0] * TILE_SIZE, y = v.y_pos + values[1] * TILE_SIZE;
+			float z = GetSlopePixelZOutsideMap(static_cast<int>(x), static_cast<int>(y)) + values[2];
+			vp.camera_3d = ViewportCamera3D::Fixed;
+			vp.camera_eye = {x, y, z, ahead ? Terrain3D::HeadingYaw(to_underlying(v.direction)) : values[3], values[4], fov};
+			log_view(vp, "fixed");
+			Debug(Facility::Driver, Severity::Error, "PHASE9 EYE vehicle={} eye={},{},{} heading={} pitch={} fov={}", v.index.base(), x, y, z, vp.camera_eye[3], vp.camera_eye[4], fov);
+		});
+	}
+	if (argv.size() == 3 && argv[1] == "chunks" && (argv[2] == "16" || argv[2] == "32")) {
+		SetTerrain3DChunkSize(argv[2] == "16" ? 16 : 32); return true;
+	}
+
+	if (argv.size() == 2 && argv[1] == "viewport" && IsProof3DEnabled()) {
+		ShowExtraViewportWindow();
+		return true;
+	}
+#endif
+	if (argv.size() != 2 || (argv[1] != "on" && argv[1] != "off")) {
+		IConsolePrint(CC_HELP, "Correctness: renderer_3d verifydirty on|off. Performance: renderer_3d performance baseline|cached|chunked|tilecached|eager|readback|optimized; renderer_3d scoped on|off; renderer_3d instancing on|off; renderer_3d staticinstances on|off; renderer_3d lod on|off; renderer_3d vehiclewindows <0..16>. Timings: debug_level driver=2.");
+		IConsolePrint(CC_HELP, "Single-player fixture preparation: renderer_3d fixturetown <x tile> <y tile> <1..2000 growth attempts> (grows the nearest town through the existing game command).");
+		IConsolePrint(CC_HELP, "Labels: renderer_3d labels inspect|click <tag>; labeloptions <display bits> <facility bits>; fixturelabels (single player fixture); labeleffects (presentation fixture). Visibility options: 0 signs through 8 text effects.");
+		IConsolePrint(CC_HELP, "Usage: renderer_3d on|off|viewport; renderer_3d camera <yaw degrees> <tilt 40..180>; renderer_3d orbit <+yaw> <+tilt> (animated); renderer_3d home; renderer_3d view <vehicle id|train|road|ship|aircraft|all> normal|cab|chase; renderer_3d press <vehicle id|all> button|hotkey (camera button); renderer_3d views (log vehicle window cameras); renderer_3d chaselog on|off; renderer_3d ride <vehicle id> depot|stop|start|turn|reverse|sell|crash|extra (single player tests); renderer_3d onride <vehicle id|any> <event> <console command>; renderer_3d after <frames> <console command>; renderer_3d eye <vehicle id|all> <+x tiles> <+y tiles> <height> <heading degrees, 0 north|ahead> <pitch degrees> [field of view] (still perspective camera); renderer_3d windowsize <vehicle id|all> <width> <height>; renderer_3d queued <command> (after pending screenshots); renderer_3d chunks 16|32; renderer_3d ground on|off; renderer_3d shadows off|contact|sun; renderer_3d shadowstats; renderer_3d fastforward on|off; renderer_3d infrastructure (read-only height and vehicle audit); renderer_3d visibility <1..8> solid|transparent|hidden.");
+		return true;
+	}
+	if (!SetProof3DEnabled(argv[1] == "on")) {
+		IConsolePrint(CC_ERROR, "3D proof unavailable: requires OPTION_3D_PROOF, Windows OpenGL, and 40bpp-anim or 32bpp-optimized.");
+	} else {
+		IConsolePrint(CC_INFO, IsProof3DEnabled() ? "3D terrain enabled; renderer_3d off restores classic view." : "Classic 2D rendering enabled.");
+	}
+	return true;
+}
 
 /* Scheduled execution handling. */
 static std::string _scheduled_monthly_script; ///< Script scheduled to execute by the 'schedule' console command (empty if no script is scheduled).
@@ -2984,6 +3758,7 @@ void IConsoleStdLibRegister()
 	IConsole::CmdRegister("screenshot",              ConScreenShot);
 	IConsole::CmdRegister("script",                  ConScript);
 	IConsole::CmdRegister("zoomto",                  ConZoomToLevel);
+	IConsole::CmdRegister("renderer_3d",             ConRenderer3D);
 	IConsole::CmdRegister("scrollto",                ConScrollToTile);
 	IConsole::CmdRegister("alias",                   ConAlias);
 	IConsole::CmdRegister("load",                    ConLoad);

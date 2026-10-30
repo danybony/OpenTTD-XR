@@ -13,6 +13,8 @@
 #include "error_func.h"
 #include "pathfinder/water_regions.h"
 
+#include "video/proof3d.h"
+
 #include "safeguards.h"
 
 /* static */ uint Map::log_x;     ///< 2^_map_log_x == _map_size_x
@@ -56,6 +58,7 @@
 	Tile::base_tiles = std::make_unique<Tile::TileBase[]>(Map::size);
 	Tile::extended_tiles = std::make_unique<Tile::TileExtended[]>(Map::size);
 
+	ResetTerrain3D();
 	AllocateWaterRegions();
 }
 

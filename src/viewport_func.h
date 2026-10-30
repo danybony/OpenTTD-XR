@@ -55,6 +55,7 @@ void DrawGroundSpriteAt(SpriteID image, PaletteID pal, int32_t x, int32_t y, int
 void AddSortableSpriteToDraw(SpriteID image, PaletteID pal, int x, int y, int z, const SpriteBounds &bounds, bool transparent = false, const SubSprite *sub = nullptr);
 void AddChildSpriteScreen(SpriteID image, PaletteID pal, int x, int y, bool transparent = false, const SubSprite *sub = nullptr, bool scale = true, bool relative = true);
 std::string *ViewportAddString(const DrawPixelInfo *dpi, const ViewportSign *sign, ViewportStringFlags flags, Colours colour);
+ViewportSign ProjectViewportSign(const Viewport *vp, const ViewportSign &sign, int x, int y, int z);
 
 inline void AddSortableSpriteToDraw(SpriteID image, PaletteID pal, const Coord3D<int32_t> &world, const SpriteBounds &bounds, bool transparent = false, const SubSprite *sub = nullptr)
 {

@@ -12,8 +12,19 @@ endif()
 #
 
 find_package(Git QUIET)
+# This fork's source can live below the workspace Git root. An exported
+# source archive's .ottdrev must still win over an unrelated enclosing repo.
+set(IN_GIT_WORKTREE FALSE)
+if(GIT_FOUND AND (EXISTS "${CMAKE_SOURCE_DIR}/.git" OR NOT EXISTS "${CMAKE_SOURCE_DIR}/.ottdrev"))
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --is-inside-work-tree
+                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                    OUTPUT_VARIABLE IN_GIT_WORKTREE
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET
+    )
+endif()
 # ${CMAKE_SOURCE_DIR}/.git may be a directory or a regular file
-if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+if(IN_GIT_WORKTREE STREQUAL "true")
     # Make sure LC_ALL is set to something desirable
     set(SAVED_LC_ALL "$ENV{LC_ALL}")
     set(ENV{LC_ALL} C)
@@ -21,14 +32,8 @@ if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
     # Assume the dir is not modified
     set(REV_MODIFIED 0)
 
-    # Refresh the index to make sure file stat info is in sync, then look for modifications
-    execute_process(COMMAND ${GIT_EXECUTABLE} update-index --refresh
-                    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-                    OUTPUT_QUIET
-    )
-
-    # See if git tree is modified
-    execute_process(COMMAND ${GIT_EXECUTABLE} diff-index HEAD
+    # Include new source files as well, without writing the workspace index.
+    execute_process(COMMAND ${GIT_EXECUTABLE} --no-optional-locks status --porcelain --untracked-files=normal
                     OUTPUT_VARIABLE IS_MODIFIED
                     OUTPUT_STRIP_TRAILING_WHITESPACE
                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -121,6 +126,32 @@ else()
     set(REV_HASH "unknown")
     set(REV_ISTAG 0)
     set(REV_ISSTABLETAG 0)
+endif()
+
+if(DEFINED OPENTTD_3D_VERSION AND NOT OPENTTD_3D_VERSION STREQUAL "")
+    if(NOT OPENTTD_3D_VERSION MATCHES "^[A-Za-z0-9][A-Za-z0-9._-]*$" OR REV_HASH STREQUAL "unknown")
+        message(FATAL_ERROR "A fork version needs a simple label and Git or .ottdrev revision metadata")
+    endif()
+    string(SUBSTRING "${REV_HASH}" 0 10 SHORTHASH)
+    if(REV_MODIFIED EQUAL 0)
+        set(FORK_HASH_PREFIX "g")
+    elseif(REV_MODIFIED EQUAL 2)
+        set(FORK_HASH_PREFIX "m")
+    else()
+        set(FORK_HASH_PREFIX "u")
+    endif()
+    set(REV_VERSION "${OPENTTD_3D_VERSION}-${FORK_HASH_PREFIX}${SHORTHASH}")
+    string(LENGTH "${REV_VERSION}" FORK_VERSION_LENGTH)
+    if(FORK_VERSION_LENGTH GREATER 32)
+        message(FATAL_ERROR "Fork version exceeds the 32-character network revision limit; shorten the label")
+    endif()
+    set(REV_ISTAG 0)
+    set(REV_ISSTABLETAG 0)
+endif()
+
+# Record archive metadata alongside the build, without modifying the checkout.
+if(DEFINED FIND_VERSION_BINARY_DIR)
+    file(WRITE "${FIND_VERSION_BINARY_DIR}/.ottdrev" "${REV_VERSION}\t${REV_ISODATE}\t${REV_MODIFIED}\t${REV_HASH}\t${REV_ISTAG}\t${REV_ISSTABLETAG}\n")
 endif()
 
 # Extract REV_YEAR and REV_DATE from REV_ISODATE

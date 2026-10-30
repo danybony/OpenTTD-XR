@@ -68,12 +68,14 @@ if(WIN32)
 endif()
 
 # Generate a target to determine version, which is execute every 'make' run
+set(OPENTTD_3D_VERSION "" CACHE STRING "Optional fork version label, e.g. 3d-alpha1")
 add_custom_target(find_version
         ${CMAKE_COMMAND}
                 -DFIND_VERSION_BINARY_DIR=${CMAKE_BINARY_DIR}/generated
                 -DCPACK_BINARY_DIR=${CMAKE_BINARY_DIR}
                 -DREV_MAJOR=${PROJECT_VERSION_MAJOR}
                 -DREV_MINOR=${PROJECT_VERSION_MINOR}
+                -DOPENTTD_3D_VERSION=${OPENTTD_3D_VERSION}
                 -DWINDOWS=${WIN32}
                 -DDOXYGEN_WARN_FORMAT_LINE=${DOXYGEN_WARN_FORMAT_LINE}
                 -DDOXYGEN_WARN_FILE=${DOXYGEN_WARN_FILE}
@@ -345,6 +347,14 @@ if(NOT OPTION_DEDICATED)
 endif()
 
 include(3rdparty/llvm/CheckAtomic)
+
+option(OPTION_3D_PROOF "Build the experimental OpenGL 3D viewport" OFF)
+if(OPTION_3D_PROOF)
+    if(NOT OPENGL_FOUND OR OPTION_DEDICATED)
+        message(FATAL_ERROR "OPTION_3D_PROOF requires a GUI build with OpenGL")
+    endif()
+    add_definitions(-DWITH_3D_PROOF)
+endif()
 
 if(APPLE)
     link_package(Iconv TARGET Iconv::Iconv)

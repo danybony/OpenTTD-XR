@@ -10,10 +10,20 @@
 #ifndef VIEWPORT_TYPE_H
 #define VIEWPORT_TYPE_H
 
+#include <array>
 #include "core/enum_type.hpp"
+#include "vehicle_type.h"
 #include "zoom_type.h"
 
 class LinkGraphOverlay;
+
+/** Presentation-only 3D camera of one view; anything but Normal rides along with a vehicle and is never picked. */
+enum class ViewportCamera3D : uint8_t {
+	Normal, ///< The shared camera of every view.
+	Cab, ///< From the front of the vehicle.
+	Chase, ///< From behind and above the vehicle.
+	Fixed, ///< A perspective camera held still where a console command placed it.
+};
 
 /** Flags to control how Viewport Strings are rendered. */
 enum class ViewportStringFlag : uint8_t {
@@ -43,6 +53,14 @@ struct Viewport {
 
 	ZoomLevel zoom; ///< The zoom level of the viewport.
 	std::shared_ptr<LinkGraphOverlay> overlay;
+
+	ViewportCamera3D camera_3d = ViewportCamera3D::Normal; ///< 3D camera of this view.
+	VehicleID camera_vehicle = VehicleID::Invalid(); ///< Vehicle a Cab or Chase camera rides with.
+	std::array<float, 6> camera_eye{}; ///< Fixed, chase or cab camera: world x, y and z, heading and pitch, and vertical field of view in degrees.
+	std::array<float, 13> camera_follow{}; ///< Chase or cab camera: smoothed x, y, z, heading and grade; the vehicle's last x, y, z, heading and grade; and the jump still being eased out.
+	uint64_t camera_follow_tick = 0; ///< Chase or cab camera: game tick of its last update.
+	float camera_dark = 0; ///< Chase or cab camera: how far faded to black while its vehicle is in a tunnel, 0 clear to 1 black.
+	bool camera_follow_set = false; ///< Whether #camera_follow and #camera_eye hold a chase or cab camera yet; cleared when the camera changes.
 };
 
 /** Location information about a sign as seen on the viewport */

@@ -45,7 +45,20 @@ enum ToolbarNormalWidgets : WidgetID {
 	WID_TN_MESSAGES,      ///< Messages menu.
 	WID_TN_HELP,          ///< Help menu.
 	WID_TN_SWITCH_BAR,    ///< Only available when toolbar has been split to switch between different subsets.
+	WID_TN_3D,            ///< Client 3D presentation and camera controls.
 	WID_TN_END,           ///< Helper for knowing the amount of widgets.
+};
+
+/** Widgets of the local 3D retro pixel preferences window. */
+enum Retro3DWidgets : WidgetID {
+	WID_R3_ENABLE,
+	WID_R3_SIZE_1,
+	WID_R3_SIZE_2,
+	WID_R3_SIZE_3,
+	WID_R3_SIZE_4,
+	WID_R3_COLOURS,
+	WID_R3_DITHER,
+	WID_R3_NOTE,
 };
 
 /** Widgets of the #ScenarioEditorToolbarWindow class. */

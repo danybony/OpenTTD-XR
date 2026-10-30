@@ -10,6 +10,18 @@ if(NOT OPTION_DEDICATED)
     add_files(
         opengl.cpp
         opengl.h
+        proof3d.h
+        proof3d_impl.h
+        terrain3d_impl.h
+        ground3d.h
+        ground3d_textures.h
+        terrain3d_cache.h
+        terrain3d_dirty.h
+        terrain3d_math.h
+        terrain3d_mesh.h
+        terrain3d_slots.h
+        rail3d_impl.h
+        rail3d_geometry.h
         CONDITION OPENGL_FOUND
     )
 

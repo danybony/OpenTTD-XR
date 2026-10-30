@@ -39,6 +39,8 @@
 #include "network/network_func.h"
 #include "network/network_gui.h"
 #include "network/network_base.h"
+#include "video/proof3d.h"
+#include "landscape.h"
 
 #include "table/sprites.h"
 #include "table/strings.h"
@@ -141,6 +143,23 @@ void ZoomInOrOutToCursorWindow(bool in, Window *w)
 	if (_game_mode != GameMode::Menu) {
 		if ((in && w->viewport->zoom <= _settings_client.gui.zoom_min) || (!in && w->viewport->zoom >= _settings_client.gui.zoom_max)) return;
 
+		/* Keep the picked ground under the pointer when zooming a rotated map. */
+		if (!IsTerrain3DCameraClassic()) {
+			auto &vp = *w->viewport;
+			Point ground = GetTileBelowCursor();
+			DoZoomInOutWindow(in ? ZOOM_IN : ZOOM_OUT, w);
+			if (ground.x >= 0 && vp.camera_3d == ViewportCamera3D::Normal) {
+				Point p = ProjectTerrain3DLabel(vp, ground.x, ground.y, GetSlopePixelZ(ground.x, ground.y));
+				Point delta = Terrain3DScrollDelta(p.x - (vp.virtual_left & ScaleByZoom(-1, vp.zoom)) - ScaleByZoom(_cursor.pos.x - vp.left, vp.zoom),
+					p.y - (vp.virtual_top & ScaleByZoom(-1, vp.zoom)) - ScaleByZoom(_cursor.pos.y - vp.top, vp.zoom));
+				vp.dest_scrollpos_x = vp.scrollpos_x += delta.x;
+				vp.dest_scrollpos_y = vp.scrollpos_y += delta.y;
+				vp.virtual_left = vp.scrollpos_x;
+				vp.virtual_top = vp.scrollpos_y;
+			}
+			return;
+		}
+
 		Point pt = GetTileZoomCenterWindow(in, w);
 		if (pt.x != -1) {
 			ScrollWindowTo(pt.x, pt.y, -1, w, true);
@@ -203,6 +222,11 @@ enum GlobalHotKeys : int32_t {
 	GHK_CHAT_SERVER,
 	GHK_CLOSE_NEWS,
 	GHK_CLOSE_ERROR,
+	GHK_3D_ROTATE_LEFT,
+	GHK_3D_ROTATE_RIGHT,
+	GHK_3D_TILT_UP,
+	GHK_3D_TILT_DOWN,
+	GHK_3D_CAMERA_TOGGLE,
 };
 
 struct MainWindow : Window
@@ -417,6 +441,20 @@ struct MainWindow : Window
 				if (!HideActiveErrorMessage()) return EventState::NotHandled;
 				break;
 
+			case GHK_3D_ROTATE_LEFT:
+			case GHK_3D_ROTATE_RIGHT:
+			case GHK_3D_TILT_UP:
+			case GHK_3D_TILT_DOWN:
+				if (!IsProof3DEnabled()) return EventState::NotHandled;
+				OrbitTerrain3DCamera(hotkey == GHK_3D_ROTATE_LEFT ? -45 : hotkey == GHK_3D_ROTATE_RIGHT ? 45 : 0,
+					hotkey == GHK_3D_TILT_UP ? 20 : hotkey == GHK_3D_TILT_DOWN ? -20 : 0, true);
+				break;
+
+			case GHK_3D_CAMERA_TOGGLE:
+				if (!IsProof3DEnabled()) return EventState::NotHandled;
+				ToggleTerrain3DCamera();
+				break;
+
 			default: return EventState::NotHandled;
 		}
 		return EventState::Handled;
@@ -424,8 +462,14 @@ struct MainWindow : Window
 
 	void OnScroll(Point delta) override
 	{
-		this->viewport->scrollpos_x += ScaleByZoom(delta.x, this->viewport->zoom);
-		this->viewport->scrollpos_y += ScaleByZoom(delta.y, this->viewport->zoom);
+		/* Ctrl+drag and holding the middle button orbit the 3D camera instead of panning. */
+		if ((_ctrl_pressed || _middle_button_down) && IsProof3DEnabled()) {
+			OrbitTerrain3DCamera(-delta.x * 0.4f, -delta.y * 0.3f, false);
+			return;
+		}
+		Point scroll = Terrain3DScrollDelta(ScaleByZoom(delta.x, this->viewport->zoom), ScaleByZoom(delta.y, this->viewport->zoom));
+		this->viewport->scrollpos_x += scroll.x;
+		this->viewport->scrollpos_y += scroll.y;
 		this->viewport->dest_scrollpos_x = this->viewport->scrollpos_x;
 		this->viewport->dest_scrollpos_y = this->viewport->scrollpos_y;
 		this->refresh_timeout.Reset();
@@ -517,6 +561,11 @@ struct MainWindow : Window
 		Hotkey({WKC_CTRL | WKC_SHIFT | WKC_RETURN, WKC_CTRL | WKC_SHIFT | 'T'}, "chat_server", GHK_CHAT_SERVER),
 		Hotkey(WKC_SPACE, "close_news", GHK_CLOSE_NEWS),
 		Hotkey(WKC_SPACE, "close_error", GHK_CLOSE_ERROR),
+		Hotkey(WKC_COMMA, "3d_rotate_left", GHK_3D_ROTATE_LEFT),
+		Hotkey(WKC_PERIOD, "3d_rotate_right", GHK_3D_ROTATE_RIGHT),
+		Hotkey(WKC_PAGEUP, "3d_tilt_up", GHK_3D_TILT_UP),
+		Hotkey(WKC_PAGEDOWN, "3d_tilt_down", GHK_3D_TILT_DOWN),
+		Hotkey(WKC_HOME, "3d_camera_toggle", GHK_3D_CAMERA_TOGGLE),
 	}};
 };
 

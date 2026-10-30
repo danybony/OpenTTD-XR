@@ -33,6 +33,8 @@
 #include "table/tree_land.h"
 #include "table/clear_land.h"
 
+#include "video/proof3d.h"
+
 #include "safeguards.h"
 
 /** Where to place trees while in-game? */
@@ -127,6 +129,8 @@ static void PlantTreesOnTile(TileIndex tile, TreeType treetype, uint count, Tree
 	}
 
 	MakeTree(tile, treetype, count, growth, ground, density);
+	/* Random tree spreading does not request a classic sprite redraw yet. */
+	MarkTerrain3DDirty(TileX(tile), TileY(tile));
 }
 
 /**

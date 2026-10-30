@@ -23,6 +23,7 @@
 #include "timer/timer_game_tick.h"
 #include "engine_func.h"
 #include "water.h"
+#include "video/proof3d.h"
 #include "tilehighlight_func.h"
 #include "saveload/saveload_func.h"
 #include "void_map.h"
@@ -77,6 +78,9 @@ class AbortGenerateWorldSignal { };
 static void CleanupGeneration()
 {
 	_generating_world = false;
+	/* Generation writes tiles without the ordinary redraw notifications. Rebuild
+	 * presentation snapshots from the completed world, including same-size maps. */
+	ResetTerrain3D();
 
 	SetMouseCursorBusy(false);
 	SetModalProgress(false);

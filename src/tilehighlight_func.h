@@ -28,6 +28,8 @@ void VpSetPresizeRange(TileIndex from, TileIndex to);
 void VpSetPlaceSizingLimit(int limit);
 
 void UpdateTileSelection();
+bool IsPartOfAutoLine(int px, int py);
+bool IsInsideRotatedRectangle(int x, int y);
 
 extern TileHighlightData _thd;
 

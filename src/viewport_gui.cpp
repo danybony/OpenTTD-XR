@@ -13,6 +13,7 @@
 #include "strings_func.h"
 #include "zoom_func.h"
 #include "window_func.h"
+#include "video/proof3d.h"
 
 #include "widgets/viewport_widget.h"
 
@@ -113,8 +114,9 @@ public:
 
 	void OnScroll(Point delta) override
 	{
-		this->viewport->scrollpos_x += ScaleByZoom(delta.x, this->viewport->zoom);
-		this->viewport->scrollpos_y += ScaleByZoom(delta.y, this->viewport->zoom);
+		Point scroll = Terrain3DScrollDelta(ScaleByZoom(delta.x, this->viewport->zoom), ScaleByZoom(delta.y, this->viewport->zoom));
+		this->viewport->scrollpos_x += scroll.x;
+		this->viewport->scrollpos_y += scroll.y;
 		this->viewport->dest_scrollpos_x = this->viewport->scrollpos_x;
 		this->viewport->dest_scrollpos_y = this->viewport->scrollpos_y;
 	}

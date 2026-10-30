@@ -16,6 +16,7 @@
 #include "vehicle_gui.h"
 #include "vehicle_gui_base.h"
 #include "viewport_func.h"
+#include "video/proof3d.h"
 #include "newgrf_text.h"
 #include "newgrf_debug.h"
 #include "roadveh.h"
@@ -2893,6 +2894,7 @@ static constexpr std::initializer_list<NWidgetPart> _nested_vehicle_view_widgets
 			EndContainer(),
 			NWidget(WWT_PUSHIMGBTN, Colours::Grey, WID_VV_SHOW_ORDERS), SetMinimalSize(18, 18), SetSpriteTip(SPR_SHOW_ORDERS),
 			NWidget(WWT_PUSHIMGBTN, Colours::Grey, WID_VV_SHOW_DETAILS), SetMinimalSize(18, 18), SetSpriteTip(SPR_SHOW_VEHICLE_DETAILS),
+			NWidget(WWT_IMGBTN, Colours::Grey, WID_VV_CAMERA), SetMinimalSize(18, 18), SetSpriteTip(SPR_CENTRE_VIEW_VEHICLE, STR_VEHICLE_VIEW_CAMERA_TOOLTIP),
 			NWidget(WWT_PANEL, Colours::Grey), SetMinimalSize(18, 0), SetResize(0, 1), EndContainer(),
 		EndContainer(),
 	EndContainer(),
@@ -2969,7 +2971,7 @@ void CcStartStopVehicle(Commands, const CommandCost &result, VehicleID veh_id, b
 	StringID msg = v->vehstatus.Test(VehState::Stopped) ? STR_VEHICLE_COMMAND_STOPPED : STR_VEHICLE_COMMAND_STARTED;
 	const Vehicle *moving_front = v->GetMovingFront();
 	Point pt = RemapCoords(moving_front->x_pos, moving_front->y_pos, moving_front->z_pos);
-	AddTextEffect(GetEncodedString(msg), pt.x, pt.y, Ticks::DAY_TICKS, TextEffectMode::Rising);
+	AddTextEffect(GetEncodedString(msg), pt.x, pt.y, Ticks::DAY_TICKS, TextEffectMode::Rising, moving_front->x_pos, moving_front->y_pos, moving_front->z_pos);
 }
 
 /**
@@ -3154,6 +3156,8 @@ public:
 		}
 
 		this->SetWidgetDisabledState(WID_VV_ORDER_LOCATION, v->current_order.GetLocation(v) == INVALID_TILE);
+		this->SetWidgetDisabledState(WID_VV_CAMERA, !IsProof3DEnabled());
+		this->SetWidgetLoweredState(WID_VV_CAMERA, IsProof3DEnabled() && this->viewport->camera_3d != ViewportCamera3D::Normal);
 	}
 
 	void OnPaint() override
@@ -3366,6 +3370,15 @@ public:
 				assert(v->type == VehicleType::Train);
 				Command<Commands::ForceTrainProceed>::Post(STR_ERROR_CAN_T_MAKE_TRAIN_PASS_SIGNAL, v->tile, v->index);
 				break;
+
+			case WID_VV_CAMERA: // 3D view: normal, then cab, then chase, then normal again; presentation only
+				if (!IsProof3DEnabled()) break;
+				this->viewport->camera_vehicle = v->index;
+				this->viewport->camera_3d = this->viewport->camera_3d == ViewportCamera3D::Normal ? ViewportCamera3D::Cab :
+					this->viewport->camera_3d == ViewportCamera3D::Cab ? ViewportCamera3D::Chase : ViewportCamera3D::Normal;
+				this->viewport->camera_follow_set = false;
+				this->SetDirty();
+				break;
 		}
 	}
 
@@ -3469,6 +3482,7 @@ public:
 
 	static inline HotkeyList hotkeys{"vehicleview", {
 		Hotkey('H', "honk", WID_VV_HONK_HORN),
+		Hotkey('V', "camera", WID_VV_CAMERA),
 	}};
 };
 
@@ -3552,6 +3566,14 @@ void StopGlobalFollowVehicle(const Vehicle *v)
 		const Vehicle *moving_front = v->GetMovingFront();
 		ScrollMainWindowTo(moving_front->x_pos, moving_front->y_pos, moving_front->z_pos, true); // lock the main view on the vehicle's last position
 		w->viewport->CancelFollow(*w);
+	}
+	/* No 3D camera outlives its vehicle or rides with a later vehicle given the same ID. */
+	for (Window *vw : Window::Iterate()) {
+		if (vw->viewport == nullptr || vw->viewport->camera_vehicle != v->index) continue;
+		vw->viewport->camera_3d = ViewportCamera3D::Normal;
+		vw->viewport->camera_vehicle = VehicleID::Invalid();
+		vw->viewport->camera_follow_set = false;
+		vw->SetDirty();
 	}
 }
 

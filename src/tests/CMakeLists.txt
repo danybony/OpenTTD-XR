@@ -19,5 +19,6 @@ add_test_files(
     test_script_admin.cpp
     test_window_desc.cpp
     tilearea.cpp
+    terrain3d.cpp
     utf8.cpp
 )

@@ -8,6 +8,7 @@
 /** @file vehicle.cpp Base implementations of all vehicles. */
 
 #include "stdafx.h"
+#include "video/proof3d.h"
 #include "error.h"
 #include "roadveh.h"
 #include "ship.h"
@@ -1243,6 +1244,9 @@ void ViewportAddVehicles(DrawPixelInfo *dpi)
  */
 Vehicle *CheckClickOnVehicle(const Viewport &vp, int x, int y)
 {
+#ifdef WITH_3D_PROOF
+	if (IsProof3DEnabled()) return PickVehicle3D(vp, x, y);
+#endif
 	Vehicle *found = nullptr;
 	uint dist, best_dist = UINT_MAX;
 
