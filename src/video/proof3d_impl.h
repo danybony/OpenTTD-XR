@@ -558,7 +558,7 @@ void main() {
   if(cameraC.w>1.5) return;
   int option=int(metadata.z); int mask=1<<option;
   obstruction=option>=1 && option<=6 && option!=5 && (int(visibility.z)&mask)==0?1.0:0.0;
-  if((int(visibility.x)&mask)!=0) stipple=1;
+  if((int(visibility.x)&mask)!=0) stipple=1.0;
   if((int(visibility.y)&mask)!=0) hidden=1;
   bool selected=all(equal(metadata.xy,selectedTile.xy));
   if(selectedTile.z>1.5) {
@@ -1605,11 +1605,11 @@ static void DrawProofContact(const Terrain3D::Camera &camera, float extent, int 
 	if (_proof_contact_width < width || _proof_contact_height < height) {
 		_proof_contact_width = std::max(width, _proof_contact_width);
 		_proof_contact_height = std::max(height, _proof_contact_height);
-		_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, _proof_contact_width, _proof_contact_height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+		_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, _proof_contact_width, _proof_contact_height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
 		_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		p_glBindFramebuffer(GL_FRAMEBUFFER, _proof_contact_fbo);
-		p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, _proof_contact_depth, 0);
+		p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, _proof_contact_depth, 0);
 		p_glDrawBuffer(GL_NONE);
 		p_glReadBuffer(GL_NONE);
 		_glActiveTexture(GL_TEXTURE7);
@@ -1794,7 +1794,7 @@ static bool RenderProofImage(ProofImage &image)
 		} else {
 			_glGenTextures(1, &image.texture);
 			_glBindTexture(GL_TEXTURE_2D, image.texture);
-			_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
+			_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 			_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		}
@@ -1803,7 +1803,7 @@ static bool RenderProofImage(ProofImage &image)
 	if (_proof_optimized ? (_proof_width < width || _proof_height < height) : (_proof_width != width || _proof_height != height)) {
 		int storage_width = _proof_optimized ? std::max(width, _proof_width) : width;
 		int storage_height = _proof_optimized ? std::max(height, _proof_height) : height;
-		_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, storage_width, storage_height, 0, GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
+		_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, storage_width, storage_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 		_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		p_glBindRenderbuffer(GL_RENDERBUFFER, _proof_depth);
@@ -2473,7 +2473,7 @@ void main() {
 	}
 	_glActiveTexture(GL_TEXTURE0);
 	_glBindTexture(GL_TEXTURE_2D, _proof_layer_colour);
-	_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
+	_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	p_glBindRenderbuffer(GL_RENDERBUFFER, _proof_layer_stencil);

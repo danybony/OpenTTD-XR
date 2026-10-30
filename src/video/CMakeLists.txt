@@ -10,6 +10,8 @@ if(NOT OPTION_DEDICATED)
     add_files(
         opengl.cpp
         opengl.h
+        opengl_es.cpp
+        opengl_es.h
         proof3d.h
         proof3d_impl.h
         terrain3d_impl.h

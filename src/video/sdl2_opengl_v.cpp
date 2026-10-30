@@ -50,11 +50,24 @@ static OGLProc GetOGLProcAddressCallback(const char *proc)
 
 bool VideoDriver_SDL_OpenGL::CreateMainWindow(uint w, uint h, uint flags)
 {
+	/* Some platforms pick how to set up the window from the requested context profile. */
+	if (this->use_gles) {
+		SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+	}
+
 	return this->VideoDriver_SDL_Base::CreateMainWindow(w, h, flags | SDL_WINDOW_OPENGL);
 }
 
 std::optional<std::string_view> VideoDriver_SDL_OpenGL::Start(const StringList &param)
 {
+#ifdef __ANDROID__
+	this->use_gles = true;
+#else
+	this->use_gles = GetDriverParamBool(param, "gles");
+#endif
 	auto error = VideoDriver_SDL_Base::Start(param);
 	if (error) return error;
 
@@ -119,7 +132,7 @@ std::optional<std::string_view> VideoDriver_SDL_OpenGL::AllocateContext()
 	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	if (!this->use_gles) SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
 	if (IsVisibleSeverity(Facility::Driver, Severity::Trace2)) {
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);

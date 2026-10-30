@@ -28,6 +28,7 @@
 #include "../3rdparty/opengl/glext.h"
 
 #include "opengl.h"
+#include "opengl_es.h"
 #include "proof3d.h"
 #include <atomic>
 #ifdef WITH_3D_PROOF
@@ -606,6 +607,8 @@ OpenGLBackend::~OpenGLBackend()
 static std::tuple<uint8_t, uint8_t> DecodeVersion(std::string_view ver)
 {
 	StringConsumer consumer{ver};
+	/* OpenGL ES prefixes both its version strings. */
+	if (!consumer.ReadIf("OpenGL ES GLSL ES ")) consumer.ReadIf("OpenGL ES ");
 	int major = consumer.ReadIntegerBase<uint8_t>(10);
 	if (consumer.ReadIf(".")) return {major, consumer.ReadIntegerBase<uint8_t>(10)};
 	return {major, 0};
@@ -636,6 +639,14 @@ std::optional<std::string_view> OpenGLBackend::Init(const Dimension &screen_res)
 #endif
 
 	std::tie(_gl_major_ver, _gl_minor_ver) = DecodeVersion(*ver);
+	if (ver->starts_with("OpenGL ES ")) {
+		if (_gl_major_ver < 3) return "OpenGL ES version >= 3.0 required";
+		/* OpenGL ES 3.0 and the compatibility layer provide what the code below looks for in OpenGL 3.3. */
+		_gl_major_ver = 3;
+		_gl_minor_ver = 3;
+		GetOGLProcAddress = WrapOGLProcAddressForES(GetOGLProcAddress);
+		if (!BindBasicInfoProcs()) return "OpenGL not supported";
+	}
 
 #ifdef _WIN32
 	/* Old drivers on Windows (especially if made by Intel) seem to be

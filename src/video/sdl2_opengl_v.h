@@ -42,6 +42,7 @@ private:
 	void *gl_context = nullptr; ///< OpenGL context.
 
 	std::optional<std::string_view> AllocateContext();
+	bool use_gles = false; ///< Request an OpenGL ES context instead of a desktop one.
 	void DestroyContext();
 };
 

@@ -9,6 +9,19 @@ toolbar button or with the console command `renderer_3d on|off`.
 It requires the `win32-opengl` or `sdl-opengl` video driver and a 32bpp or
 40bpp-anim blitter. Other configurations keep the classic renderer.
 
+## OpenGL ES
+
+The backend and the renderer also run on an OpenGL ES 3.0 context, which is the
+base for an Android port. Select it on desktop with `-v sdl-opengl:gles`; Android
+builds always use it. `src/video/opengl_es.cpp` hands out replacements for the
+functions ES lacks and rewrites GLSL 1.50 shaders to GLSL ES 3.00, so call sites
+stay shared. Two rules keep code compatible with it:
+
+- Create textures that are rendered to as `GL_RGBA`. `GL_BGRA` textures sample
+  through a red/blue swizzle, which only suits uploaded data.
+- Write shaders valid in both GLSL dialects, for example `1.0` rather than `1`
+  for a float.
+
 ## Provenance
 
 The renderer, models and textures come from
@@ -23,6 +36,7 @@ tools live in that repository. `src/video/asset3d_art.h`, `asset3d_lod.h`,
 - Ported from OpenTTD 15.3 to current master (enum classes, typed bit sets,
   debug facilities).
 - Enabled on the SDL2 OpenGL driver, including the middle mouse button.
+- Added OpenGL ES 3.0 support.
 - Removed the trailer-recording console command (`film_cmd.cpp`).
 
 ## Testing without a GPU
