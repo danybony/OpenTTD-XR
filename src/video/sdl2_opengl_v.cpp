@@ -12,6 +12,7 @@
 #define APIENTRY
 
 #include "../stdafx.h"
+#include <chrono>
 #include "../openttd.h"
 #include "../gfx_func.h"
 #include "../rev.h"
@@ -211,6 +212,24 @@ void VideoDriver_SDL_OpenGL::Paint()
 
 		this->local_palette.count_dirty = 0;
 	}
+
+#ifdef WITH_3D_PROOF
+	/* Diagnostics: split the frame into submitting, waiting for the GPU and presenting. */
+	if (IsVisibleSeverity(Facility::Driver, Severity::Debug2)) {
+		static const auto gl_finish = reinterpret_cast<void (APIENTRY *)()>(GetOGLProcAddressCallback("glFinish"));
+		using Clock = std::chrono::steady_clock;
+		auto micros = [](Clock::time_point from, Clock::time_point to) { return std::chrono::duration_cast<std::chrono::microseconds>(to - from).count(); };
+		const auto start = Clock::now();
+		OpenGLBackend::Get()->Paint();
+		OpenGLBackend::Get()->DrawMouseCursor();
+		const auto submitted = Clock::now();
+		gl_finish();
+		const auto finished = Clock::now();
+		SDL_GL_SwapWindow(this->sdl_window);
+		Debug(Facility::Driver, Severity::Debug2, "PHASE7 paintparts submit_us={} finish_us={} swap_us={}", micros(start, submitted), micros(submitted, finished), micros(finished, Clock::now()));
+		return;
+	}
+#endif
 
 	OpenGLBackend::Get()->Paint();
 	OpenGLBackend::Get()->DrawMouseCursor();

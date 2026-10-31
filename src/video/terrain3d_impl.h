@@ -118,7 +118,7 @@ struct TerrainAngle {
 };
 
 /** How far a perspective view draws, fading into fog before it. */
-static constexpr float TERRAIN_DRAW_DISTANCE = 64 * TILE_SIZE;
+static float _terrain_draw_distance = 64 * TILE_SIZE;
 
 /** The shared orbit camera; the pivot sits at the ground height under the view, so orbiting a hill keeps it centred. */
 static TerrainAngle SharedTerrainAngle()
@@ -131,7 +131,7 @@ static TerrainAngle SharedTerrainAngle()
 /** Whether a view has its own Phase 9 camera; such views are never picked. */
 static bool OwnTerrainCamera(const Viewport &vp)
 {
-	return vp.camera_3d != ViewportCamera3D::Normal && Vehicle::IsValidID(vp.camera_vehicle);
+	return vp.camera_3d == ViewportCamera3D::Fixed || (vp.camera_3d != ViewportCamera3D::Normal && Vehicle::IsValidID(vp.camera_vehicle));
 }
 
 /** Grade of a vehicle on a sloped tile: one tile height over one tile. */
@@ -215,16 +215,17 @@ static bool RideEnded3D(const Vehicle &v)
 static TerrainAngle ViewTerrainAngle(const Viewport &vp)
 {
 	if (!OwnTerrainCamera(vp)) return SharedTerrainAngle();
+	auto e = vp.camera_eye;
+	if (vp.camera_3d == ViewportCamera3D::Fixed) return {e[3], 0, 0, {e[0], e[1], e[2]}, e[3], e[4], e[5]};
 	const Vehicle *v = Vehicle::Get(vp.camera_vehicle);
 	bool cab = vp.camera_3d == ViewportCamera3D::Cab;
-	auto e = vp.camera_eye;
-	if (!vp.camera_follow_set && vp.camera_3d != ViewportCamera3D::Fixed) e = cab ? CabTerrainEye(*v, ChaseVehicleTarget(*v)) : ChaseTerrainEye(ChaseVehicleTarget(*v));
+	if (!vp.camera_follow_set) e = cab ? CabTerrainEye(*v, ChaseVehicleTarget(*v)) : ChaseTerrainEye(ChaseVehicleTarget(*v));
 	TerrainAngle view{e[3], 0, 0, {e[0], e[1], e[2]}, e[3], e[4], e[5]};
 	if (cab) {
 		view.hidden = {static_cast<float>(v->x_pos), static_cast<float>(v->y_pos), static_cast<float>(v->z_pos)};
 		view.hides = true;
 	}
-	if (vp.camera_3d != ViewportCamera3D::Fixed) view.dark = vp.camera_follow_set ? vp.camera_dark : VehicleInTunnel3D(*v) ? 1.0f : 0.0f;
+	view.dark = vp.camera_follow_set ? vp.camera_dark : VehicleInTunnel3D(*v) ? 1.0f : 0.0f;
 	return view;
 }
 
@@ -233,7 +234,7 @@ static bool _chase_log = false; ///< Log every chase and cab camera update, for 
 static Terrain3D::Camera TerrainCamera(int width, int height, int left, int top, int zoom, TerrainAngle view)
 {
 	if (view.fov > 0) {
-		auto camera = Terrain3D::PerspectiveCamera(view.eye, view.heading, view.pitch, view.fov, static_cast<float>(width), static_cast<float>(height), TERRAIN_DRAW_DISTANCE);
+		auto camera = Terrain3D::PerspectiveCamera(view.eye, view.heading, view.pitch, view.fov, static_cast<float>(width), static_cast<float>(height), _terrain_draw_distance);
 		camera.hidden = view.hidden;
 		camera.hides = view.hides;
 		camera.dark = view.dark;
@@ -1083,8 +1084,38 @@ static std::pair<int, int> RideState3D(const Vehicle &v)
 
 /** Ease a chase or cab view towards its vehicle once per frame, fading it out in tunnels, and return it to normal
  * when the ride ends; presentation only. Returns whether its camera moved. */
+/** A camera orbiting a point at a constant height, so every frame renders the whole scene as a moving head would. */
+static struct {
+	float target_x, target_y, radius, spin;
+} _terrain_bench{};
+
+void SetTerrain3DDrawDistance(int tiles)
+{
+	_terrain_draw_distance = static_cast<float>(tiles * TILE_SIZE);
+	MarkWholeScreenDirty();
+}
+
+void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, float fov, float spin)
+{
+	const float radius = height / std::tan(std::abs(pitch) * 3.14159265359f / 180);
+	const float z = GetSlopePixelZOutsideMap(x, y) + height;
+	const float heading = 45;
+	auto forward = Terrain3D::HeadingForward(heading);
+	_terrain_bench = {static_cast<float>(x), static_cast<float>(y), radius, spin};
+	vp.camera_3d = ViewportCamera3D::Fixed;
+	vp.camera_eye = {x - forward[0] * radius, y - forward[1] * radius, z, heading, pitch, fov};
+}
+
 bool UpdateViewportCamera3D(Viewport &vp, uint32_t delta_ms)
 {
+	if (vp.camera_3d == ViewportCamera3D::Fixed && _terrain_bench.spin != 0) {
+		const float heading = vp.camera_eye[3] + _terrain_bench.spin;
+		auto forward = Terrain3D::HeadingForward(heading);
+		vp.camera_eye[0] = _terrain_bench.target_x - forward[0] * _terrain_bench.radius;
+		vp.camera_eye[1] = _terrain_bench.target_y - forward[1] * _terrain_bench.radius;
+		vp.camera_eye[3] = heading;
+		return true;
+	}
 	bool cab = vp.camera_3d == ViewportCamera3D::Cab;
 	if ((!cab && vp.camera_3d != ViewportCamera3D::Chase) || !Vehicle::IsValidID(vp.camera_vehicle)) {
 		vp.camera_follow_set = false;

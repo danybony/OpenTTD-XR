@@ -811,6 +811,21 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 			Debug(Facility::Driver, Severity::Error, "PHASE9 EYE vehicle={} eye={},{},{} heading={} pitch={} fov={}", v.index.base(), x, y, z, vp.camera_eye[3], vp.camera_eye[4], fov);
 		});
 	}
+	if (argv.size() == 3 && argv[1] == "drawdistance") {
+		int tiles = 0;
+		if (std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), tiles).ec != std::errc{} || tiles < 1) return false;
+		SetTerrain3DDrawDistance(tiles);
+		return true;
+	}
+	if (argv.size() == 6 && argv[1] == "bench" && IsProof3DEnabled()) {
+		/* renderer_3d bench <height> <pitch> <field of view> <degrees per frame>: orbit what the main view is looking at. */
+		auto parse = [](std::string_view text) { return std::strtof(std::string{text}.c_str(), nullptr); };
+		auto *w = GetMainWindow();
+		if (w == nullptr || w->viewport == nullptr) return false;
+		Point centre = TranslateXYToTileCoord(*w->viewport, w->viewport->left + w->viewport->width / 2, w->viewport->top + w->viewport->height / 2);
+		StartTerrain3DBench(*w->viewport, centre.x, centre.y, parse(argv[2]), parse(argv[3]), parse(argv[4]), parse(argv[5]));
+		return true;
+	}
 	if (argv.size() == 3 && argv[1] == "chunks" && (argv[2] == "16" || argv[2] == "32")) {
 		SetTerrain3DChunkSize(argv[2] == "16" ? 16 : 32); return true;
 	}

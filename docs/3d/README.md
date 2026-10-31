@@ -47,7 +47,13 @@ of each version. The script lists the variables it needs. It requires a device
 or emulator with OpenGL ES 3.0; the game uses the ES layer above.
 
 Read logs with `adb logcat -s OpenTTD`. In the console, `debug_level driver=6`
-prints the per-frame renderer counters.
+prints the per-frame renderer counters and splits each frame into submitting,
+waiting for the GPU and presenting. The GPU wait changes the frame rate, so take
+frame rates without it.
+
+`renderer_3d bench <height> <pitch> <field of view> <degrees per frame>` makes the
+main view orbit its centre in perspective, so every frame renders in full as with
+a moving head. `renderer_3d drawdistance <tiles>` limits how far it draws.
 
 When testing in the emulator, start it with `-gpu swangle_indirect`. With
 `swiftshader_indirect` the 3D view shows only the clear colour and labels.

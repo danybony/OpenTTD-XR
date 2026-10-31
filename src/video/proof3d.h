@@ -100,6 +100,9 @@ std::string AuditInfrastructure3D();
 std::string AuditAssets3D();
 std::string AuditCoverage3D();
 void HighlightTerrain3D(int x, int y);
+/** Diagnostics: the perspective draw distance, and a camera orbiting a world point so every frame renders in full. */
+void SetTerrain3DDrawDistance(int tiles);
+void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, float fov, float spin);
 bool UpdateViewportCamera3D(Viewport &vp, uint32_t delta_ms);
 void SetViewportCamera3DLog(bool enabled);
 /** Test scripts: called with a ride-along view's vehicle, the event's name and how dark the view is. */
