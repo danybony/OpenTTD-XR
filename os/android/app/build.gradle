@@ -1,0 +1,36 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "org.openttd.xr"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "org.openttd.xr"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "0.1"
+    }
+
+    sourceSets {
+        main {
+            /* SDLActivity and friends come from the SDL2 sources; see build.sh. */
+            java.srcDirs += [providers.gradleProperty("sdlJavaDir").get()]
+            jniLibs.srcDirs = [providers.gradleProperty("jniLibsDir").get()]
+            assets.srcDirs = [providers.gradleProperty("assetsDir").get()]
+        }
+    }
+
+    androidResources {
+        /* Keep the game data readable as is, and do not skip names starting with an underscore. */
+        noCompress "tar", "grf", "lng", "obs", "obm"
+        ignoreAssetsPattern "!.git"
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

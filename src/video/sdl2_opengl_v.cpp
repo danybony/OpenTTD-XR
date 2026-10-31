@@ -50,6 +50,11 @@ static OGLProc GetOGLProcAddressCallback(const char *proc)
 
 bool VideoDriver_SDL_OpenGL::CreateMainWindow(uint w, uint h, uint flags)
 {
+#ifdef __ANDROID__
+	/* SDL would otherwise follow the shape of the window, which is free to resize. */
+	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
+
 	/* Some platforms pick how to set up the window from the requested context profile. */
 	if (this->use_gles) {
 		SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");

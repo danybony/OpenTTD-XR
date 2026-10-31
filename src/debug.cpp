@@ -18,6 +18,9 @@
 #if defined(_WIN32)
 #include "os/windows/win32.h"
 #endif
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
 
 #include "3rdparty/fmt/chrono.h"
 
@@ -101,7 +104,11 @@ void DebugPrint(Facility facility, Severity severity, std::string &&message)
 		fflush(*f);
 #endif
 	} else {
+#ifdef __ANDROID__
+		__android_log_print(ANDROID_LOG_INFO, "OpenTTD", "[%s:%d] %s", std::string{_debug_facilities[facility]}.c_str(), to_underlying(severity), message.c_str());
+#else
 		fmt::print(stderr, "{}dbg: [{}:{}] {}\n", GetLogPrefix(true), _debug_facilities[facility], severity, message);
+#endif
 
 		if (_debug_remote_console.load()) {
 			/* Only add to the queue when there is at least one consumer of the data. */

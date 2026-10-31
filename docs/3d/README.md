@@ -36,8 +36,21 @@ tools live in that repository. `src/video/asset3d_art.h`, `asset3d_lod.h`,
 - Ported from OpenTTD 15.3 to current master (enum classes, typed bit sets,
   debug facilities).
 - Enabled on the SDL2 OpenGL driver, including the middle mouse button.
-- Added OpenGL ES 3.0 support.
+- Added OpenGL ES 3.0 support and an Android build.
 - Removed the trailer-recording console command (`film_cmd.cpp`).
+
+## Android
+
+`os/android/build.sh` builds a debug APK: SDL2 and liblzma, then the game as
+`libmain.so`, then a thin activity that unpacks the game data on the first launch
+of each version. The script lists the variables it needs. It requires a device
+or emulator with OpenGL ES 3.0; the game uses the ES layer above.
+
+Read logs with `adb logcat -s OpenTTD`. In the console, `debug_level driver=6`
+prints the per-frame renderer counters.
+
+When testing in the emulator, start it with `-gpu swangle_indirect`. With
+`swiftshader_indirect` the 3D view shows only the clear colour and labels.
 
 ## Testing without a GPU
 

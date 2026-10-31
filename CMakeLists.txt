@@ -171,7 +171,11 @@ if(APPLE)
     find_library(QUARTZCORE_LIBRARY QuartzCore)
 endif()
 
-if(NOT EMSCRIPTEN AND NOT OPTION_DEDICATED)
+if(ANDROID)
+    # OpenGL ES comes with the NDK and SDL2 loads it at runtime.
+    set(OPENGL_FOUND TRUE)
+    include_directories(${CMAKE_SOURCE_DIR}/os/android/include)
+elseif(NOT EMSCRIPTEN AND NOT OPTION_DEDICATED)
     find_package(OpenGL COMPONENTS OpenGL)
 endif()
 
@@ -244,9 +248,15 @@ include_directories(${CMAKE_SOURCE_DIR}/src/3rdparty/squirrel/include)
 include(MSVCFilters)
 
 add_library(openttd_lib OBJECT ${GENERATED_SOURCE_FILES})
-add_executable(openttd WIN32)
+if(ANDROID)
+    # SDLActivity loads the game from a library called libmain.so.
+    add_library(openttd SHARED)
+    set_target_properties(openttd PROPERTIES OUTPUT_NAME main)
+else()
+    add_executable(openttd WIN32)
+    set_target_properties(openttd PROPERTIES OUTPUT_NAME "${BINARY_NAME}")
+endif()
 add_executable(openttd_test)
-set_target_properties(openttd PROPERTIES OUTPUT_NAME "${BINARY_NAME}")
 # All other files are added via target_sources()
 
 if(MSVC)
@@ -291,6 +301,7 @@ target_link_libraries(openttd
 
 target_link_libraries(openttd_test PRIVATE openttd_lib)
 if(ANDROID)
+    target_link_libraries(openttd log)
     target_link_libraries(openttd_test PRIVATE log)
 endif()
 

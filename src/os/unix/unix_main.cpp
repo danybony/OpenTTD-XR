@@ -16,10 +16,32 @@
 #include <time.h>
 #include <signal.h>
 
+#ifdef __ANDROID__
+#	include <SDL.h>
+#	include <unistd.h>
+#endif
+
 #include "../../safeguards.h"
+
+#ifdef __ANDROID__
+/** Keep everything inside the app's private storage, where the activity also unpacked the game data. */
+static void SetupAndroidPaths()
+{
+	const std::string base = SDL_AndroidGetInternalStoragePath();
+	setenv("HOME", base.c_str(), 1);
+	setenv("XDG_DATA_HOME", (base + "/data").c_str(), 1);
+	setenv("XDG_CONFIG_HOME", (base + "/config").c_str(), 1);
+	setenv("XDG_STATE_HOME", (base + "/state").c_str(), 1);
+	if (chdir((base + "/game").c_str()) != 0) SDL_Log("No game data in %s", base.c_str());
+}
+#endif
 
 int CDECL main(int argc, char *argv[])
 {
+#ifdef __ANDROID__
+	SetupAndroidPaths();
+#endif
+
 	/* Make sure our arguments contain only valid UTF-8 characters. */
 	std::vector<std::string_view> params;
 	for (int i = 0; i < argc; ++i) {

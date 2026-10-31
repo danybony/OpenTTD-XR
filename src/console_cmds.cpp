@@ -375,7 +375,7 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 		AutoRestoreBackup ctrl(_ctrl_pressed, false);
 		AutoRestoreBackup in_window(_cursor.in_window, true);
 		AutoRestoreBackup pointer(_cursor.pos, Point{vp.left + vp.width / 2, vp.top + vp.height / 2});
-		_tile_fract_coords = {a.x & TILE_UNIT_MASK, a.y & TILE_UNIT_MASK};
+		_tile_fract_coords = {static_cast<int>(a.x & TILE_UNIT_MASK), static_cast<int>(a.y & TILE_UNIT_MASK)};
 		if (!single || mode == "build") toolbar->OnPlaceObject(a, TileVirtXY(a.x, a.y));
 		if (!single) {
 			toolbar->OnPlaceDrag(_thd.select_method, _thd.select_proc, b);
@@ -471,7 +471,7 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 		 * scoped cursor values never inject OS input or change the user's cursor. */
 		AutoRestoreBackup in_window(_cursor.in_window, true);
 		AutoRestoreBackup pointer(_cursor.pos, Point{vp.left + vp.width / 2, vp.top + vp.height / 2});
-		_tile_fract_coords = {a.x & TILE_UNIT_MASK, a.y & TILE_UNIT_MASK};
+		_tile_fract_coords = {static_cast<int>(a.x & TILE_UNIT_MASK), static_cast<int>(a.y & TILE_UNIT_MASK)};
 		toolbar->OnPlaceObject(a, TileVirtXY(a.x, a.y));
 		toolbar->OnPlaceDrag(_thd.select_method, _thd.select_proc, b);
 		/* A scripted preview has no held native mouse button. Prevent the ordinary
@@ -791,8 +791,11 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 	if ((argv.size() == 8 || argv.size() == 9) && argv[1] == "eye" && IsProof3DEnabled()) {
 		/* Phase 9.2: a still perspective camera, placed from where each vehicle is now. */
 		auto parse = [](std::string_view text, float &value) {
-			auto result = std::from_chars(text.data(), text.data() + text.size(), value);
-			return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+			/* libc++ has no std::from_chars for floats. */
+			const std::string copy{text};
+			char *end = nullptr;
+			value = std::strtof(copy.c_str(), &end);
+			return !copy.empty() && *end == '\0';
 		};
 		std::array<float, 5> values{}; // Tiles along x and y, height above the ground, heading and pitch.
 		float fov = 60;
