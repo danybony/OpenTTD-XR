@@ -350,7 +350,7 @@ static std::vector<ProofInstance> _proof_instance_upload;
 /** Locations belong to a linked program and are refreshed when its GL context is recreated. */
 struct ProofLocations {
 	GLint cameraA, cameraB, cameraC, selection, selectedTile, visibility, viewProjection, eye, fog;
-	GLint modelA, modelB, companyA, companyB, groundTextures, groundMap, groundInfo, groundCrisp;
+	GLint modelA, modelB, companyA, companyB, groundTextures, groundMap, groundInfo, groundCrisp, groundFast;
 	GLint shadowMap, shadowMatrix, shadowInfo, shadowFade, autoFocus;
 	std::array<GLint, 6> vertex;
 	std::array<GLint, 4> instance;
@@ -411,6 +411,7 @@ static void ProofUniform(GLint location, float a, float b, float c, float d)
 
 /** Haze a perspective view fades into; its images are cleared to it, so the draw distance leaves no edge. */
 static constexpr std::array<float, 3> PROOF_FOG{0.62f, 0.71f, 0.78f};
+static bool _ground_fast = false; ///< Diagnostics: one ground texture per tile.
 
 /** Perspective projection and fog; an orthographic camera leaves eye.w at 0 and the shaders keep their own projection. */
 static void ProofPerspectiveUniforms(const ProofLocations &locations, const Terrain3D::Camera &camera)
@@ -579,7 +580,7 @@ void main() {
 in vec3 tint; in float stipple; flat in int hidden; in vec2 worldPos; flat in vec2 faceTile; flat in float groundLayer; in float haze;
 in vec3 shadowPlace; in float shadowReceive; flat in float obstruction;
 uniform vec4 autoFocus;
-uniform sampler2DArray groundTextures; uniform usampler2D groundMap; uniform vec4 groundInfo, groundCrisp, fog;
+uniform sampler2DArray groundTextures; uniform usampler2D groundMap; uniform vec4 groundInfo, groundCrisp, fog; uniform float groundFast;
 out vec4 pixel;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float valueNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
@@ -604,7 +605,7 @@ void main(){
  vec3 mean=textureLod(groundTextures,vec3(0.5,0.5,own),groundInfo.w).rgb;
  float light=dot(tint,vec3(1))/max(dot(mean,vec3(1)),0.01);
  vec3 colour;
- if(groundLayer>=128.0) colour=textureGrad(groundTextures,vec3(uv,own),du,dv).rgb;
+ if(groundLayer>=128.0 || groundFast>0.5) colour=textureGrad(groundTextures,vec3(uv,own),du,dv).rgb;
  else {
   vec2 warp=vec2(valueNoise(worldPos*0.19),valueNoise(worldPos*0.19+vec2(17,5)))-0.5;
   warp+=0.5*(vec2(valueNoise(worldPos*0.47+vec2(3,11)),valueNoise(worldPos*0.47+vec2(29,13)))-0.5);
@@ -649,6 +650,7 @@ void main(){
 	_proof_locations.groundTextures = _glGetUniformLocation(_proof_program, "groundTextures");
 	_proof_locations.groundMap = _glGetUniformLocation(_proof_program, "groundMap");
 	_proof_locations.groundInfo = _glGetUniformLocation(_proof_program, "groundInfo");
+	_proof_locations.groundFast = _glGetUniformLocation(_proof_program, "groundFast");
 	_proof_locations.groundCrisp = _glGetUniformLocation(_proof_program, "groundCrisp");
 	_proof_locations.shadowMap = _glGetUniformLocation(_proof_program, "shadowMap");
 	_proof_locations.shadowMatrix = _glGetUniformLocation(_proof_program, "shadowMatrix");
@@ -1830,7 +1832,7 @@ static bool RenderProofImage(ProofImage &image)
 	if (black) {
 		_glClearColor(0, 0, 0, 1);
 	} else if (camera.Perspective()) {
-		_glClearColor(PROOF_FOG[0], PROOF_FOG[1], PROOF_FOG[2], 1);
+		if (camera.table_half > 0) _glClearColor(0, 0, 0, 1); else _glClearColor(PROOF_FOG[0], PROOF_FOG[1], PROOF_FOG[2], 1);
 	} else {
 		_glClearColor(0.10f, 0.17f, 0.23f, 1);
 	}
@@ -1965,6 +1967,7 @@ static bool RenderProofImage(ProofImage &image)
 	_glUniform1i(_proof_locations.groundTextures, 1);
 	_glUniform1i(_proof_locations.groundMap, 2);
 	ProofUniform(_proof_locations.groundCrisp, Ground3D::FIELD_0, Ground3D::FIELD_8, Ground3D::CONCRETE, 0);
+	_glUniform1f(_proof_locations.groundFast, _ground_fast ? 1.0f : 0.0f);
 	ProofUniform(_proof_locations.groundInfo, textured ? 1.0f : 0.0f, float(_ground_map_width), float(_ground_map_height), float(std::bit_width(unsigned(Ground3D::TEXTURE_SIZE)) - 1));
 	bool measure_gpu = _proof_queries[0] != 0 && IsVisibleSeverity(Facility::Driver, Severity::Debug2);
 	size_t query = _proof_query_next;
@@ -2754,6 +2757,8 @@ void SetProof3DInstanceStreams(bool enabled)
 	Debug(Facility::Driver, Severity::Debug1, "PHASE7 retained-streams enabled={}", enabled);
 	InvalidateProof3DImages();
 }
+
+void SetTerrain3DGroundFast(bool enabled) { _ground_fast = enabled; MarkWholeScreenDirty(); }
 
 void SetProof3DModelLOD(bool enabled)
 {

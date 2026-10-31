@@ -811,6 +811,16 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 			Debug(Facility::Driver, Severity::Error, "PHASE9 EYE vehicle={} eye={},{},{} heading={} pitch={} fov={}", v.index.base(), x, y, z, vp.camera_eye[3], vp.camera_eye[4], fov);
 		});
 	}
+	if (argv.size() == 3 && argv[1] == "table") {
+		int tiles = 0;
+		if (std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), tiles).ec != std::errc{} || tiles < 0) return false;
+		SetTerrain3DTable(tiles);
+		return true;
+	}
+	if (argv.size() == 3 && argv[1] == "groundfast") {
+		SetTerrain3DGroundFast(argv[2] == "on");
+		return true;
+	}
 	if (argv.size() == 3 && argv[1] == "drawdistance") {
 		int tiles = 0;
 		if (std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), tiles).ec != std::errc{} || tiles < 1) return false;

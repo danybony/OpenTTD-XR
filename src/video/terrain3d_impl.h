@@ -119,6 +119,8 @@ struct TerrainAngle {
 
 /** How far a perspective view draws, fading into fog before it. */
 static float _terrain_draw_distance = 64 * TILE_SIZE;
+static float _terrain_table_half = 0; ///< Half the side of the square a table view draws, in world units; 0 for no table.
+static float _terrain_table_x = 0, _terrain_table_y = 0; ///< Centre of the table.
 
 /** The shared orbit camera; the pivot sits at the ground height under the view, so orbiting a hill keeps it centred. */
 static TerrainAngle SharedTerrainAngle()
@@ -238,6 +240,9 @@ static Terrain3D::Camera TerrainCamera(int width, int height, int left, int top,
 		camera.hidden = view.hidden;
 		camera.hides = view.hides;
 		camera.dark = view.dark;
+		camera.table_x = _terrain_table_x;
+		camera.table_y = _terrain_table_y;
+		camera.table_half = _terrain_table_half;
 		return camera;
 	}
 	float scale = static_cast<float>(ZOOM_BASE) / (1U << zoom) * view.magnify;
@@ -1089,6 +1094,14 @@ static struct {
 	float target_x, target_y, radius, spin;
 } _terrain_bench{};
 
+void SetTerrain3DTable(int tiles)
+{
+	_terrain_table_half = static_cast<float>(tiles * TILE_SIZE) / 2;
+	/* Nothing fades out on a table, and everything around it stays undrawn. */
+	if (tiles > 0) _terrain_draw_distance = 1024 * TILE_SIZE;
+	MarkWholeScreenDirty();
+}
+
 void SetTerrain3DDrawDistance(int tiles)
 {
 	_terrain_draw_distance = static_cast<float>(tiles * TILE_SIZE);
@@ -1102,6 +1115,8 @@ void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, 
 	const float heading = 45;
 	auto forward = Terrain3D::HeadingForward(heading);
 	_terrain_bench = {static_cast<float>(x), static_cast<float>(y), radius, spin};
+	_terrain_table_x = static_cast<float>(x);
+	_terrain_table_y = static_cast<float>(y);
 	vp.camera_3d = ViewportCamera3D::Fixed;
 	vp.camera_eye = {x - forward[0] * radius, y - forward[1] * radius, z, heading, pitch, fov};
 }

@@ -27,6 +27,7 @@ struct Camera {
 	Vec hidden{0, 0, 0}; ///< A cab view's own vehicle, which it does not draw: the vehicle drawn exactly here.
 	bool hides = false; ///< Whether #hidden is set.
 	float dark = 0; ///< How far a perspective view has faded to black, 0 clear to 1 black, as in a tunnel.
+	float table_x = 0, table_y = 0, table_half = 0; ///< A perspective view draws only this square of the world when table_half is set.
 	bool Perspective() const { return distance > 0; }
 	/** Clip-space row of the perspective matrix. */
 	std::array<float, 4> Row(int i) const { return {matrix[i], matrix[4 + i], matrix[8 + i], matrix[12 + i]}; }
@@ -200,6 +201,8 @@ inline std::array<float, 2> ClassicScrollDelta(float dx, float dy, float cosine,
 inline bool Visible(Vec low, Vec high, const Camera &camera)
 {
 	if (camera.Perspective()) {
+		if (camera.table_half > 0 && (high.x < camera.table_x - camera.table_half || low.x > camera.table_x + camera.table_half ||
+				high.y < camera.table_y - camera.table_half || low.y > camera.table_y + camera.table_half)) return false;
 		/* Each plane is row 3 plus or minus another row; a box is outside when its corner furthest inside is still outside one. */
 		auto w = camera.Row(3);
 		for (int i = 0; i < 6; ++i) {

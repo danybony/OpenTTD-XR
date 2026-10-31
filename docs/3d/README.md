@@ -53,7 +53,10 @@ frame rates without it.
 
 `renderer_3d bench <height> <pitch> <field of view> <degrees per frame>` makes the
 main view orbit its centre in perspective, so every frame renders in full as with
-a moving head. `renderer_3d drawdistance <tiles>` limits how far it draws.
+a moving head. `renderer_3d drawdistance <tiles>` limits how far it draws,
+`renderer_3d table <tiles>` draws only a square around that centre on black, as a
+tabletop view would, and `renderer_3d groundfast on` skips blending the ground
+across tile edges.
 
 When testing in the emulator, start it with `-gpu swangle_indirect`. With
 `swiftshader_indirect` the 3D view shows only the clear colour and labels.
