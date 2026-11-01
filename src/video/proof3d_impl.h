@@ -2704,11 +2704,11 @@ static void VerifyProof3DLayer()
 	if (error != GL_NO_ERROR) Debug(Facility::Driver, Severity::Error, "3D layer reference OpenGL error: {}", error);
 }
 
-/** Draw the windows as panels over the 3D layer, each as its part of the video buffer. */
+/** Draw the part of the screen that is the main view, then the windows as panels over it. */
 void DrawProof3DPanels(GLuint video_texture, GLuint vao)
 {
 	static GLuint program = 0;
-	static GLint corners = -1, rect = -1, texture = -1;
+	static GLint corners = -1, rect = -1, texture = -1, solid = -1;
 	if (program == 0) {
 		const char *vertex = R"GLSL(#version 150
 uniform vec4 corners[4]; uniform vec4 rect;
@@ -2719,28 +2719,57 @@ void main() {
  gl_Position=corners[gl_VertexID];
 })GLSL";
 		const char *fragment = R"GLSL(#version 150
-uniform sampler2D colour_tex;
+uniform sampler2D colour_tex; uniform vec4 solid;
 in vec2 uv; out vec4 pixel;
-void main() { pixel=texture(colour_tex,uv); })GLSL";
+void main() { pixel=solid.a>0.0?solid:texture(colour_tex,uv); })GLSL";
 		program = ProofCompileProgram({vertex}, {fragment});
 		if (program == 0) return;
 		corners = _glGetUniformLocation(program, "corners");
 		rect = _glGetUniformLocation(program, "rect");
 		texture = _glGetUniformLocation(program, "colour_tex");
+		solid = _glGetUniformLocation(program, "solid");
 	}
+	/* The buffer is taller than the window, but the window is what is being drawn on. */
+	_glViewport(0, 0, _screen.width, GetXRDisplayHeight());
+	_glClear(GL_COLOR_BUFFER_BIT);
 	_glActiveTexture(GL_TEXTURE0);
-	_glBindTexture(GL_TEXTURE_2D, video_texture);
-	/* Panels are rarely exactly one pixel to one pixel. */
-	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	_glUseProgram(program);
 	_glUniform1i(texture, 0);
+	p_glUniform4f(solid, 0, 0, 0, 0);
 	_glBindVertexArray(vao);
+
+	const bool have_layer = _proof_layer_colour != 0 && _proof_layer_width == _screen.width && _proof_layer_height == _screen.height;
+	if (have_layer) {
+		/* The main view is what the layer has where the buffer is the screen. */
+		static constexpr std::array<std::array<float, 4>, 4> whole{{{-1, 1, 0, 1}, {1, 1, 0, 1}, {-1, -1, 0, 1}, {1, -1, 0, 1}}};
+		_glDisable(GL_BLEND);
+		_glBindTexture(GL_TEXTURE_2D, _proof_layer_colour);
+		p_glUniform4fv(corners, 4, whole[0].data());
+		p_glUniform4f(rect, 0, 0, 1, static_cast<float>(GetXRDisplayHeight()) / _screen.height);
+		_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	}
+
+	/* Panels are rarely exactly one pixel to one pixel. */
+	_glBindTexture(GL_TEXTURE_2D, video_texture);
+	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	_glEnable(GL_BLEND);
 	p_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
 	for (const auto &panel : GetXRPanelDraws()) {
 		p_glUniform4fv(corners, 4, panel.corners[0].data());
 		p_glUniform4f(rect, panel.uv[0], panel.uv[1], panel.uv[2], panel.uv[3]);
+		if (panel.grip) {
+			p_glUniform4f(solid, 0.75f, 0.75f, 0.72f, 0.9f);
+			_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			p_glUniform4f(solid, 0, 0, 0, 0);
+			continue;
+		}
+		if (panel.has_view && have_layer) {
+			/* The 3D view in the window, under the window's holes. */
+			_glBindTexture(GL_TEXTURE_2D, _proof_layer_colour);
+			_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+			_glBindTexture(GL_TEXTURE_2D, video_texture);
+		}
 		_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	}
 	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2814,7 +2843,7 @@ static bool DrawProof3DLayer(GLuint program, GLuint vao)
 /** Re-render changed views into the pixels they own, without redrawing the 2D UI. */
 static void RefreshProof3DLayer()
 {
-	const Window *main_window = GetMainWindow();
+
 	/* The tile-loop warm-up clears _generating_world before generation is done. */
 	if (HasModalProgress()) return;
 	RefreshProof3DScene();
@@ -2841,7 +2870,7 @@ static void RefreshProof3DLayer()
 		/* A dirty clip may already have rendered this image earlier in the frame. It still
 		 * needs to replace every pixel owned by this view, not just that clip. */
 		if (_proof_layer_revisions[index] == image->revision) continue;
-		_proof_layer_queue.push_back({image->texture, vp.left, vp.top, vp.height, vp.left, vp.top, vp.left + vp.width, vp.top + vp.height, uint8_t(index), IsXRPanelsActive() && w == main_window});
+		_proof_layer_queue.push_back({image->texture, vp.left, vp.top, vp.height, vp.left, vp.top, vp.left + vp.width, vp.top + vp.height, uint8_t(index), false});
 		_proof_layer_revisions[index] = image->revision;
 		++_proof_layer_refreshes;
 	}

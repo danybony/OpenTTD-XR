@@ -141,6 +141,13 @@ static uint FindStartupDisplay(uint startup_display)
  * @param h The new height of the window.
  * @param force Whether to force full reallocation, instead of not reallocating when size did not change.
  */
+void VideoDriver_SDL_Base::VideoBufferLayoutChanged()
+{
+	int w, h;
+	SDL_GetWindowSize(this->sdl_window, &w, &h);
+	this->ClientSizeChanged(w, h, true);
+}
+
 void VideoDriver_SDL_Base::ClientSizeChanged(int w, int h, bool force)
 {
 	/* Allocate backing store of the new size. */

@@ -1855,9 +1855,6 @@ Window::Window(WindowDesc &desc) : window_desc(desc), scale(_gui_scale), mouse_c
  */
 Window *FindWindowFromPt(int x, int y)
 {
-	/* Panels leave the world under the cursor even where the buffer holds a window. */
-	if (IsXRPanelsActive() && _xr_cursor_on_world) return GetMainWindow();
-
 	for (Window *w : Window::IterateFromFront()) {
 		if (MayBeShown(w) && IsInsideBS(x, w->left, w->width) && IsInsideBS(y, w->top, w->height)) {
 			return w;
@@ -3638,6 +3635,8 @@ void RelocateAllWindows(int neww, int newh)
 			case WindowClass::Highscore:
 			case WindowClass::Endscreen:
 				ResizeWindow(w, neww, newh);
+				/* What the video buffer has below the screen is not to be seen. */
+				if (GetXRAtlasExtraHeight() != 0) ResizeWindow(w, 0, newh - GetXRAtlasExtraHeight() - w->height, false);
 				continue;
 
 			case WindowClass::MainToolbar:

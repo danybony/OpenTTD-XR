@@ -160,6 +160,11 @@ public:
 	virtual void EditBoxGainedFocus() {}
 
 	/**
+	 * The video buffer needs another size for the same window.
+	 */
+	virtual void VideoBufferLayoutChanged() {}
+
+	/**
 	 * Get a list of refresh rates of each available monitor.
 	 * @return A vector of the refresh rates of all available monitors.
 	 */

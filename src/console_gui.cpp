@@ -30,6 +30,8 @@
 
 #include "table/strings.h"
 
+#include "xr_panels.h"
+
 #include "safeguards.h"
 
 static const uint ICON_HISTORY_SIZE       = 20;
@@ -153,7 +155,7 @@ struct IConsoleWindow : Window
 		_iconsole_mode = IConsoleMode::Opened;
 
 		this->InitNested(0);
-		ResizeWindow(this, _screen.width, _screen.height / 3);
+		ResizeWindow(this, _screen.width, (_screen.height - GetXRAtlasExtraHeight()) / 3);
 	}
 
 	void OnInit() override
@@ -409,11 +411,11 @@ void IConsoleResize(Window *w)
 {
 	switch (_iconsole_mode) {
 		case IConsoleMode::Opened:
-			w->height = _screen.height / 3;
+			w->height = (_screen.height - GetXRAtlasExtraHeight()) / 3;
 			w->width = _screen.width;
 			break;
 		case IConsoleMode::Full:
-			w->height = _screen.height - ICON_BOTTOM_BORDERWIDTH;
+			w->height = (_screen.height - GetXRAtlasExtraHeight()) - ICON_BOTTOM_BORDERWIDTH;
 			w->width = _screen.width;
 			break;
 		default: return;

@@ -30,6 +30,7 @@
 #include <GL/gl.h>
 #include "../3rdparty/opengl/glext.h"
 #include "opengl.h"
+#include "../xr_panels.h"
 #ifdef __EMSCRIPTEN__
 #	include <emscripten.h>
 #	include <emscripten/html5.h>
@@ -172,7 +173,7 @@ bool VideoDriver_SDL_OpenGL::AllocateBackingStore(int w, int h, bool force)
 	h = std::max(h, 64);
 	this->dirty_rect = {};
 
-	bool res = OpenGLBackend::Get()->Resize(w, h, force);
+	bool res = OpenGLBackend::Get()->Resize(w, h + GetXRAtlasExtraHeight(), force);
 	SDL_GL_SwapWindow(this->sdl_window);
 	_screen.dst_ptr = this->GetVideoPointer();
 

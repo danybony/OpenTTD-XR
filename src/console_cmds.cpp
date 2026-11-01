@@ -92,6 +92,12 @@
 
 #include "table/strings.h"
 
+#include "company_gui.h"
+#include "goal_gui.h"
+#include "gui.h"
+#include "industry.h"
+#include "news_gui.h"
+#include "station_func.h"
 #include "xr_panels.h"
 
 #include "safeguards.h"
@@ -817,9 +823,33 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 		/* renderer_3d panels on|off|room|view: windows as panels on a tabletop view, staying on the screen or in the room. */
 		if (argv[2] == "room" || argv[2] == "view") {
 			SetXRPanelsRoomAnchored(argv[2] == "room");
+		} else if (argv[2] == "log") {
+			LogXRPanels();
 		} else {
 			SetXRPanels(argv[2] == "on");
 		}
+		return true;
+	}
+	if (argv.size() == 2 && argv[1] == "openwindows") {
+		/* Test scripts: open one of many kinds of window, to see them as panels. */
+		for (const Station *st : Station::Iterate()) {
+			ShowStationViewWindow(st->index);
+			break;
+		}
+		for (const Industry *ind : Industry::Iterate()) {
+			extern void ShowIndustryViewWindow(IndustryID industry);
+			ShowIndustryViewWindow(ind->index);
+			break;
+		}
+		for (const Town *t : Town::Iterate()) {
+			ShowTownViewWindow(t->index);
+			break;
+		}
+		ShowIndustryDirectory();
+		ShowTownDirectory();
+		ShowCompanyFinances(_local_company);
+		ShowGoalsList(_local_company);
+		ShowLastNewsMessage();
 		return true;
 	}
 	if (argv.size() == 2 && argv[1] == "tablecheck") {

@@ -18,6 +18,8 @@
 struct XRPanelDraw {
 	std::array<std::array<float, 4>, 4> corners; ///< Clip space corners: top left, top right, bottom left, bottom right.
 	std::array<float, 4> uv; ///< The window in the video buffer: left, top, right, bottom in texture coordinates.
+	bool has_view; ///< The window holds a 3D view, which shows through its holes from the same place in the 3D layer.
+	bool grip; ///< This is a handle to drag the panel by, drawn in plain colour rather than from the buffer.
 };
 
 #ifdef WITH_3D_PROOF
@@ -25,6 +27,9 @@ bool IsXRPanelsActive();
 void SetXRPanels(bool active);
 void SetXRPanelsRoomAnchored(bool room);
 void UpdateXRPanels();
+void LogXRPanels();
+int GetXRAtlasExtraHeight();
+int GetXRDisplayHeight();
 const std::vector<XRPanelDraw> &GetXRPanelDraws();
 Point MapScreenToXRPanels(int x, int y);
 bool StartXRPanelDrag(int x, int y);
@@ -34,14 +39,12 @@ void EndXRPanelDrag();
 #else
 inline bool IsXRPanelsActive() { return false; }
 inline void UpdateXRPanels() {}
+inline int GetXRAtlasExtraHeight() { return 0; }
 inline Point MapScreenToXRPanels(int x, int y) { return {x, y}; }
 inline bool StartXRPanelDrag(int, int) { return false; }
 inline bool IsXRPanelDragging() { return false; }
 inline void MoveXRPanelDrag(int, int) {}
 inline void EndXRPanelDrag() {}
 #endif
-
-/** The cursor is over the world rather than over a panel, so clicks go to the main window whatever is in the buffer there. */
-extern bool _xr_cursor_on_world;
 
 #endif /* XR_PANELS_H */

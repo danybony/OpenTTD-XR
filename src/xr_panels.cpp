@@ -8,16 +8,15 @@
 /**
  * @file xr_panels.cpp Windows floating in space as panels, around the tabletop view.
  *
- * All windows keep drawing to the one video buffer as usual, but are laid out there so that
- * none overlaps another, like an atlas. Each is then shown as a panel that samples its part
- * of the buffer, and the cursor is translated from the screen to that part of the buffer. So
- * the windows themselves do not know: they draw and take clicks as always.
+ * All windows keep drawing to the one video buffer as usual, but that buffer is taller than the
+ * screen, and the windows are laid out in the extra part so that none overlaps another, like an
+ * atlas. The main view has the part that is the screen to itself. Each window is then shown as a
+ * panel that samples its part of the buffer, and the cursor is translated from the screen to that
+ * part of the buffer. So the windows themselves do not know: they draw and take clicks as always.
  */
 
 #include "stdafx.h"
 #include "xr_panels.h"
-
-bool _xr_cursor_on_world = false;
 
 #ifdef WITH_3D_PROOF
 
@@ -28,6 +27,7 @@ bool _xr_cursor_on_world = false;
 #include "window_func.h"
 #include "window_gui.h"
 #include "video/proof3d.h"
+#include "video/video_driver.hpp"
 #include "video/xr_panel_math.h"
 
 #include "safeguards.h"
@@ -36,13 +36,17 @@ using Terrain3D::Vec;
 
 /** Distance from the eye of panels that have not been placed in the room. Their size on the screen does not depend on it. */
 static constexpr float PANEL_DISTANCE = 400;
+/** How tall the video buffer is, with room for the windows below the screen. All OpenGL ES 3.0 hardware of interest allows it. */
+static constexpr int ATLAS_HEIGHT = 4096;
 
 struct Panel {
 	Window *window;
 	float screen_x, screen_y; ///< Middle of the panel on the screen, in pixels.
 	Vec room; ///< Where the panel is in the room, if anchored there.
-	std::array<std::array<float, 2>, 4> on_screen; ///< Corners on the screen: top left, top right, bottom right, bottom left.
+	std::array<std::array<float, 2>, 4> on_screen; ///< Corners on the screen, with the grip: top left, top right, bottom right, bottom left.
 	bool visible; ///< Whether all of it is in front of the eye.
+	int grip_height; ///< Height of the handle to drag the panel by, if it has no title bar to do that.
+	bool grip_above; ///< Whether the handle is above the window rather than below it.
 };
 
 static bool _active = false;
@@ -50,6 +54,7 @@ static bool _room_anchored = false;
 static std::vector<Panel> _panels; ///< From the back to the front.
 static std::vector<XRPanelDraw> _draws;
 static Panel *_dragging = nullptr;
+static int _display_height = 0; ///< Height of the part of the buffer that is the screen.
 static Point _drag_offset{};
 
 /** The camera of the view the panels float in. */
@@ -88,22 +93,34 @@ bool IsXRPanelsActive()
 	return _active;
 }
 
+int GetXRAtlasExtraHeight()
+{
+	return _active ? std::max(ATLAS_HEIGHT - _display_height, 0) : 0;
+}
+
+int GetXRDisplayHeight()
+{
+	return _display_height;
+}
+
+static void MoveWindowTo(Window *w, int left, int top);
+
 void SetXRPanels(bool active)
 {
 	if (_active == active) return;
-	_active = active;
 	/* Leaving, windows stay where their panels were on the screen, as far as the game's own limits allow. */
 	if (!active) {
 		for (const auto &panel : _panels) {
-			panel.window->left = static_cast<int>(std::round(panel.screen_x - panel.window->width / 2.0f));
-			panel.window->top = static_cast<int>(std::round(panel.screen_y - panel.window->height / 2.0f));
+			MoveWindowTo(panel.window, static_cast<int>(std::round(panel.screen_x - panel.window->width / 2.0f)), static_cast<int>(std::round(panel.screen_y - panel.window->height / 2.0f)));
 		}
 	}
 	_panels.clear();
 	_draws.clear();
 	_dragging = nullptr;
-	_xr_cursor_on_world = false;
-	if (!active) RelocateAllWindows(_screen.width, _screen.height);
+	_display_height = active ? _screen.height : 0;
+	_active = active;
+	/* The buffer changes size, which also makes all windows find their place again. */
+	VideoDriver::GetInstance()->VideoBufferLayoutChanged();
 	ForgetProof3DImages();
 	MarkWholeScreenDirty();
 }
@@ -123,10 +140,23 @@ static Panel *FindPanel(const Window *w)
 	return it == _panels.end() ? nullptr : &*it;
 }
 
-/** Lay out all windows in rows in the buffer, moving those that are not in place yet. */
+/** Lay out all windows in rows in the part of the buffer below the screen, moving those that are not in place yet. */
+static void MoveWindowTo(Window *w, int left, int top)
+{
+	if (w->left == left && w->top == top) return;
+	w->SetDirty();
+	if (w->viewport != nullptr) {
+		w->viewport->left += left - w->left;
+		w->viewport->top += top - w->top;
+	}
+	w->left = left;
+	w->top = top;
+	w->SetDirty();
+}
+
 static void LayoutAtlas()
 {
-	int x = 0, y = 0, row = 0;
+	int x = 0, y = _display_height, row = 0;
 	for (Window *w : Window::IterateFromBack()) {
 		if (w->window_class == WindowClass::MainWindow) continue;
 		if (x + w->width > _screen.width) {
@@ -134,14 +164,8 @@ static void LayoutAtlas()
 			y += row;
 			row = 0;
 		}
-		/* The buffer is the size of the screen for now. Later windows overlap the first ones when it is full. */
-		const int top = y + w->height > _screen.height ? 0 : y;
-		if (w->left != x || w->top != top) {
-			w->SetDirty();
-			w->left = x;
-			w->top = top;
-			w->SetDirty();
-		}
+		/* When even this is full, later windows overlap the first ones rather than disappear. */
+		MoveWindowTo(w, x, y + w->height > _screen.height ? _display_height : y);
 		x += w->width;
 		row = std::max(row, w->height);
 	}
@@ -166,13 +190,25 @@ void UpdateXRPanels()
 			panels.push_back(*known);
 			continue;
 		}
-		float x = w->left + w->width / 2.0f, y = w->top + w->height / 2.0f;
+		/* The whole buffer is free where the game looks for a place to open a window, so that says little. Bars
+		 * have their fixed places, fitted to the height of the screen, and the others open in a cascade. */
+		float x = w->left + w->width / 2.0f;
+		float y = w->top * std::max(_display_height - w->height, 0) / static_cast<float>(std::max(_screen.height - w->height, 1)) + w->height / 2.0f;
+		const bool bar = w->window_class == WindowClass::MainToolbar || w->window_class == WindowClass::Statusbar;
+		if (!bar) {
+			static int cascade = 0;
+			const int step = 24 * _gui_scale / 100;
+			cascade = (cascade + 1) % 8;
+			x = std::max(_screen.width / 4.0f + cascade * step, w->width / 2.0f);
+			y = std::clamp(_display_height / 6.0f + cascade * step + w->height / 2.0f, w->height / 2.0f, std::max(_display_height - w->height / 2.0f, w->height / 2.0f));
+		}
 		if (const Panel *parent = FindPanel(w->parent); parent != nullptr) {
-			x += parent->screen_x - (w->parent->left + w->parent->width / 2.0f);
-			y += parent->screen_y - (w->parent->top + w->parent->height / 2.0f);
+			x = w->left + w->width / 2.0f + parent->screen_x - (w->parent->left + w->parent->width / 2.0f);
+			y = w->top + w->height / 2.0f + parent->screen_y - (w->parent->top + w->parent->height / 2.0f);
 		}
 		const auto c = GetPanelCamera(*main->viewport);
-		panels.push_back({w, x, y, PanelWorldPosition(c, *main->viewport, x, y), {}, true});
+		/* Windows without a title bar get a handle, on the side where there is room. */
+		panels.push_back({w, x, y, PanelWorldPosition(c, *main->viewport, x, y), {}, true, bar ? 20 * _gui_scale / 100 : 0, y > _display_height / 2.0f});
 	}
 	_panels = std::move(panels);
 	_dragging = nullptr;
@@ -183,35 +219,64 @@ void UpdateXRPanels()
 	const auto c = GetPanelCamera(*main->viewport);
 	const Viewport &vp = *main->viewport;
 	_draws.clear();
+	const float buffer_width = static_cast<float>(_screen.width), buffer_height = static_cast<float>(_screen.height);
 	for (auto &panel : _panels) {
 		const Window *w = panel.window;
-		const float panel_width = w->width * c.units_per_pixel, panel_height = w->height * c.units_per_pixel;
+		const int total_height = w->height + panel.grip_height;
 		std::array<Vec, 4> world;
 		if (_room_anchored) {
-			world = XRPanel::BillboardCorners(panel.room, c.eye, panel_width, panel_height);
+			world = XRPanel::BillboardCorners(panel.room, c.eye, w->width * c.units_per_pixel, total_height * c.units_per_pixel);
 		} else {
 			/* Lined up with the screen and on whole pixels, so text stays sharp. */
-			const float left = std::round(panel.screen_x - w->width / 2.0f), top = std::round(panel.screen_y - w->height / 2.0f);
+			const float left = std::round(panel.screen_x - w->width / 2.0f);
+			const float top = std::round(panel.screen_y - w->height / 2.0f) - (panel.grip_above ? panel.grip_height : 0);
 			world = {PanelWorldPosition(c, vp, left, top), PanelWorldPosition(c, vp, left + w->width, top),
-				PanelWorldPosition(c, vp, left + w->width, top + w->height), PanelWorldPosition(c, vp, left, top + w->height)};
+				PanelWorldPosition(c, vp, left + w->width, top + total_height), PanelWorldPosition(c, vp, left, top + total_height)};
 		}
-		std::array<std::array<float, 4>, 4> clip;
-		panel.visible = true;
-		for (int i = 0; i < 4; i++) {
+		/* A part of the panel, in fractions of its width and height. */
+		auto clip_at = [&](float u, float v) {
+			const Vec p{world[0].x + (world[1].x - world[0].x) * u + (world[3].x - world[0].x) * v,
+				world[0].y + (world[1].y - world[0].y) * u + (world[3].y - world[0].y) * v,
+				world[0].z + (world[1].z - world[0].z) * u + (world[3].z - world[0].z) * v};
+			std::array<float, 4> clip;
 			for (int row = 0; row < 4; row++) {
 				const auto r = c.camera.Row(row);
-				clip[i][row] = r[0] * world[i].x + r[1] * world[i].y + r[2] * world[i].z + r[3];
+				clip[row] = r[0] * p.x + r[1] * p.y + r[2] * p.z + r[3];
 			}
-			if (clip[i][3] <= 0.01f) {
+			return clip;
+		};
+		panel.visible = true;
+		const std::array<std::array<float, 2>, 4> fractions{{{0, 0}, {1, 0}, {1, 1}, {0, 1}}};
+		for (int i = 0; i < 4; i++) {
+			const auto clip = clip_at(fractions[i][0], fractions[i][1]);
+			if (clip[3] <= 0.01f) {
 				panel.visible = false;
-				continue;
+				break;
 			}
-			panel.on_screen[i] = {(clip[i][0] / clip[i][3] + 1) * vp.width / 2 + vp.left, (1 - clip[i][1] / clip[i][3]) * vp.height / 2 + vp.top};
+			panel.on_screen[i] = {(clip[0] / clip[3] + 1) * vp.width / 2 + vp.left, (1 - clip[1] / clip[3]) * vp.height / 2 + vp.top};
 		}
 		if (!panel.visible) continue;
-		const float width = static_cast<float>(_screen.width), height = static_cast<float>(_screen.height);
-		/* The draw order of the corners is a triangle strip. */
-		_draws.push_back({{clip[0], clip[1], clip[3], clip[2]}, {w->left / width, w->top / height, (w->left + w->width) / width, (w->top + w->height) / height}});
+
+		const float grip_part = static_cast<float>(panel.grip_height) / total_height;
+		const float window_top = panel.grip_above ? grip_part : 0, window_bottom = panel.grip_above ? 1 : 1 - grip_part;
+		/* The order of the corners of a draw is a triangle strip. */
+		_draws.push_back({{clip_at(0, window_top), clip_at(1, window_top), clip_at(0, window_bottom), clip_at(1, window_bottom)},
+			{w->left / buffer_width, w->top / buffer_height, (w->left + w->width) / buffer_width, (w->top + w->height) / buffer_height},
+			w->viewport != nullptr, false});
+		if (panel.grip_height != 0) {
+			/* A pill in the middle of the strip, which as a whole can be grabbed. */
+			const float grip_top = panel.grip_above ? grip_part * 0.25f : window_bottom + grip_part * 0.25f, grip_bottom = grip_top + grip_part * 0.5f;
+			_draws.push_back({{clip_at(0.35f, grip_top), clip_at(0.65f, grip_top), clip_at(0.35f, grip_bottom), clip_at(0.65f, grip_bottom)}, {}, false, true});
+		}
+	}
+}
+
+void LogXRPanels()
+{
+	Debug(Facility::Driver, Severity::Error, "PANELS screen={}x{} display={} count={}", _screen.width, _screen.height, _display_height, _panels.size());
+	for (const auto &panel : _panels) {
+		const Window *w = panel.window;
+		Debug(Facility::Driver, Severity::Error, "PANEL class={} rect={},{} {}x{} screen={},{} visible={}", to_underlying(w->window_class), w->left, w->top, w->width, w->height, panel.screen_x, panel.screen_y, panel.visible);
 	}
 }
 
@@ -221,14 +286,17 @@ const std::vector<XRPanelDraw> &GetXRPanelDraws()
 }
 
 /** Find the panel at a place on the screen, from the front to the back, and where on the window that is. */
-static Panel *FindPanelAt(int x, int y, Point &in_buffer)
+static Panel *FindPanelAt(int x, int y, Point &in_buffer, bool &on_grip)
 {
 	for (auto it = _panels.rbegin(); it != _panels.rend(); ++it) {
 		if (!it->visible) continue;
 		float u, v;
 		if (!XRPanel::ScreenToPanel(it->on_screen, static_cast<float>(x), static_cast<float>(y), u, v)) continue;
 		const Window *w = it->window;
-		in_buffer = {w->left + std::min(static_cast<int>(u * w->width), w->width - 1), w->top + std::min(static_cast<int>(v * w->height), w->height - 1)};
+		const int total_height = w->height + it->grip_height;
+		const int along = std::min(static_cast<int>(v * total_height), total_height - 1) - (it->grip_above ? it->grip_height : 0);
+		on_grip = along < 0 || along >= w->height;
+		in_buffer = {w->left + std::min(static_cast<int>(u * w->width), w->width - 1), w->top + std::clamp(along, 0, w->height - 1)};
 		return &*it;
 	}
 	return nullptr;
@@ -238,18 +306,23 @@ Point MapScreenToXRPanels(int x, int y)
 {
 	if (!_active) return {x, y};
 	Point in_buffer;
-	_xr_cursor_on_world = FindPanelAt(x, y, in_buffer) == nullptr;
-	return _xr_cursor_on_world ? Point{x, y} : in_buffer;
+	bool on_grip;
+	/* Anything that is not on a panel is the main view, which is the part of the buffer that is the screen. */
+	return FindPanelAt(x, y, in_buffer, on_grip) != nullptr ? in_buffer : Point{x, y};
 }
 
 bool StartXRPanelDrag(int x, int y)
 {
 	if (!_active) return false;
 	Point in_buffer;
-	Panel *panel = FindPanelAt(x, y, in_buffer);
-	if (panel == nullptr || panel->window->nested_root == nullptr) return false;
-	const NWidgetCore *widget = panel->window->nested_root->GetWidgetFromPos(in_buffer.x - panel->window->left, in_buffer.y - panel->window->top);
-	if (widget == nullptr || widget->type != WWT_CAPTION) return false;
+	bool on_grip;
+	Panel *panel = FindPanelAt(x, y, in_buffer, on_grip);
+	if (panel == nullptr) return false;
+	if (!on_grip) {
+		if (panel->window->nested_root == nullptr) return false;
+		const NWidgetCore *widget = panel->window->nested_root->GetWidgetFromPos(in_buffer.x - panel->window->left, in_buffer.y - panel->window->top);
+		if (widget == nullptr || widget->type != WWT_CAPTION) return false;
+	}
 	_dragging = panel;
 	_drag_offset = {x, y};
 	return true;

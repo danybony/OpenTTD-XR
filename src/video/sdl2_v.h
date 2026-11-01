@@ -60,6 +60,7 @@ protected:
 	bool LockVideoBuffer() override;
 	void UnlockVideoBuffer() override;
 	void CheckPaletteAnim() override;
+	void VideoBufferLayoutChanged() override;
 	bool PollEvent() override;
 
 	void ClientSizeChanged(int w, int h, bool force);

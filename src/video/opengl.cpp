@@ -1144,6 +1144,16 @@ void OpenGLBackend::UpdatePalette(const Colour *pal, uint first, uint length)
  */
 void OpenGLBackend::Paint()
 {
+#ifdef WITH_3D_PROOF
+	/* Windows are panels: there is no screen sized video buffer to show. */
+	if (IsXRPanelsActive() && !BlitterFactory::GetCurrentBlitter()->NeedsAnimationBuffer()) {
+		DrawProof3DPanels(this->vid_texture, this->vao_quad);
+		_glEnable(GL_BLEND);
+		_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		return;
+	}
+#endif
+
 	_glClear(GL_COLOR_BUFFER_BIT);
 
 	/* The 3D layer, when present, is drawn first and shows through the video buffer's transparent holes. */
@@ -1151,13 +1161,6 @@ void OpenGLBackend::Paint()
 	bool layer = DrawProof3DLayer(this->vid_program, this->vao_quad);
 #else
 	bool layer = false;
-#endif
-#ifdef WITH_3D_PROOF
-	if (layer && IsXRPanelsActive() && !BlitterFactory::GetCurrentBlitter()->NeedsAnimationBuffer()) {
-		DrawProof3DPanels(this->vid_texture, this->vao_quad);
-		_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		return;
-	}
 #endif
 	if (!layer) _glDisable(GL_BLEND);
 
