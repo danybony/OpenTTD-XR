@@ -77,6 +77,8 @@
 
 #include "dropdown_common_type.h"
 
+#include "xr_panels.h"
+
 #include "safeguards.h"
 
 
@@ -267,6 +269,7 @@ enum Camera3DMenu {
 	C3M_RETRO,
 	C3M_TABLETOP,
 	C3M_TILE_GRID,
+	C3M_PANELS,
 };
 
 static void ShowCamera3DMenu(Window *w)
@@ -289,6 +292,7 @@ static void ShowCamera3DMenu(Window *w)
 	list.push_back(MakeDropDownListDividerItem());
 	const Window *main_window = GetMainWindow();
 	list.push_back(MakeDropDownListCheckedItem(main_window != nullptr && main_window->viewport != nullptr && IsTerrain3DTabletop(*main_window->viewport), STR_3D_TABLETOP, C3M_TABLETOP, !enabled));
+	list.push_back(MakeDropDownListCheckedItem(IsXRPanelsActive(), STR_3D_PANELS, C3M_PANELS, main_window == nullptr || main_window->viewport == nullptr || !IsTerrain3DTabletop(*main_window->viewport)));
 	list.push_back(MakeDropDownListStringItem(STR_3D_CLASSIC, C3M_CLASSIC, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_ORBIT, C3M_ORBIT, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_LEFT, C3M_LEFT, !enabled));
@@ -329,6 +333,7 @@ static void SelectCamera3DMenu(int index)
 		case C3M_TILT_DOWN: OrbitTerrain3DCamera(0, -10, true); break;
 		case C3M_HELP: AllocateWindowDescFront<Camera3DHelpWindow>(_3d_help_desc, 1); break;
 		case C3M_RETRO: AllocateWindowDescFront<Retro3DWindow>(_3d_retro_desc, 0); break;
+		case C3M_PANELS: SetXRPanels(!IsXRPanelsActive()); break;
 		case C3M_TABLETOP:
 			if (Window *main_window = GetMainWindow(); IsProof3DEnabled() && main_window != nullptr && main_window->viewport != nullptr) ToggleTerrain3DTabletop(*main_window->viewport);
 			break;

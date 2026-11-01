@@ -41,6 +41,8 @@
 
 #include "table/strings.h"
 
+#include "xr_panels.h"
+
 #include "safeguards.h"
 
 
@@ -690,7 +692,8 @@ void GuiShowTooltips(Window *parent, EncodedString &&text, TooltipCloseCondition
 {
 	CloseWindowById(WindowClass::ToolTips, 0);
 
-	if (text.empty() || !_cursor.in_window) return;
+	/* Panels have nothing under the cursor to show one next to, as the cursor is somewhere else in the buffer. */
+	if (text.empty() || !_cursor.in_window || IsXRPanelsActive()) return;
 
 	new TooltipsWindow(parent, std::move(text), close_tooltip);
 }

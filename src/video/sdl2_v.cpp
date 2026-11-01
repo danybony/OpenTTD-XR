@@ -22,6 +22,7 @@
 #include "../viewport_func.h"
 #include "sdl2_v.h"
 #include "touch_gesture.h"
+#include "../xr_panels.h"
 #include <SDL.h>
 #ifdef __EMSCRIPTEN__
 #	include <emscripten.h>
@@ -438,6 +439,8 @@ static constexpr auto TOUCH_PRESS_DELAY = std::chrono::milliseconds(100);
 static void PressTouch()
 {
 	_touch.pending = false;
+	/* The title bar of a panel moves the panel, rather than the window in the buffer. */
+	if (StartXRPanelDrag(static_cast<int>(_touch.fingers[0].pos.x), static_cast<int>(_touch.fingers[0].pos.y))) return;
 	_touch.pressed = true;
 	_left_button_down = true;
 	HandleMouseEvents();
@@ -454,7 +457,8 @@ static void ReleaseTouch()
 static void MoveTouchCursor(TouchPoint pos)
 {
 	_cursor.in_window = true;
-	_cursor.UpdateCursorPosition(static_cast<int>(pos.x), static_cast<int>(pos.y));
+	const Point cursor = MapScreenToXRPanels(static_cast<int>(pos.x), static_cast<int>(pos.y));
+	_cursor.UpdateCursorPosition(cursor.x, cursor.y);
 	HandleMouseEvents();
 }
 
@@ -488,7 +492,11 @@ static void HandleFingerEvent(const SDL_TouchFingerEvent &finger)
 				HandleTwoFingerGesture(step.pan_x, step.pan_y, step.scale, step.rotate);
 			} else if (!_touch.gesture) {
 				if (_touch.pending && std::hypot(pos.x - _touch.start.x, pos.y - _touch.start.y) >= TOUCH_PRESS_DISTANCE) PressTouch();
-				if (_touch.pressed) MoveTouchCursor(pos);
+				if (IsXRPanelDragging()) {
+					MoveXRPanelDrag(static_cast<int>(pos.x), static_cast<int>(pos.y));
+				} else if (_touch.pressed) {
+					MoveTouchCursor(pos);
+				}
 			}
 			tracked->pos = pos;
 			break;
@@ -498,6 +506,7 @@ static void HandleFingerEvent(const SDL_TouchFingerEvent &finger)
 			/* A short tap never got to be a press, but is a click all the same. */
 			if (_touch.pending) PressTouch();
 			if (_touch.pressed) ReleaseTouch();
+			EndXRPanelDrag();
 			*tracked = _touch.fingers[_touch.count - 1];
 			if (--_touch.count == 0 && _touch.gesture) {
 				_touch.gesture = false;
@@ -570,7 +579,12 @@ bool VideoDriver_SDL_Base::PollEvent()
 				}
 			}
 
-			if (_cursor.UpdateCursorPosition(x, y)) {
+			if (IsXRPanelDragging()) {
+				MoveXRPanelDrag(x, y);
+				break;
+			}
+			const Point cursor = MapScreenToXRPanels(x, y);
+			if (_cursor.UpdateCursorPosition(cursor.x, cursor.y) && !IsXRPanelsActive()) {
 				SDL_WarpMouseInWindow(this->sdl_window, _cursor.pos.x, _cursor.pos.y);
 			}
 			HandleMouseEvents();
@@ -604,6 +618,7 @@ bool VideoDriver_SDL_Base::PollEvent()
 
 			switch (ev.button.button) {
 				case SDL_BUTTON_LEFT:
+					if (StartXRPanelDrag(ev.button.x, ev.button.y)) break;
 					_left_button_down = true;
 					break;
 
@@ -628,6 +643,7 @@ bool VideoDriver_SDL_Base::PollEvent()
 				_left_button_down = false;
 				_left_button_clicked = false;
 			} else if (ev.button.button == SDL_BUTTON_LEFT) {
+				EndXRPanelDrag();
 				_left_button_down = false;
 				_left_button_clicked = false;
 			} else if (ev.button.button == SDL_BUTTON_RIGHT) {

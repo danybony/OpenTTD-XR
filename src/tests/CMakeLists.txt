@@ -21,5 +21,6 @@ add_test_files(
     tilearea.cpp
     terrain3d.cpp
     touch_gesture.cpp
+    xr_panel.cpp
     utf8.cpp
 )

@@ -77,6 +77,15 @@ or in the tabletop view move, grow and turn the table.
 `renderer_3d fingers <pan x> <pan y> <scale> <degrees clockwise>` feeds such a
 gesture through the event queue, for testing without two real fingers.
 
+## Floating panels
+
+On the tabletop view, the 3D menu can show the windows as panels floating in the
+view, which is how they would appear on a headset. `src/xr_panels.cpp` lays them
+out in the video buffer without overlap and draws each as a quad sampling its part
+of the buffer, so the windows draw and take clicks as always. Drag the title bar of
+a panel to move it. `renderer_3d panels room` keeps them in place in the world
+rather than on the screen, to see them turn towards the viewer.
+
 ## Testing without a GPU
 
 Mesa software rendering is refused by default. For a local test build, configure

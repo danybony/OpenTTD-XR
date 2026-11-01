@@ -41,6 +41,7 @@
 #include "script/api/script_event_types.hpp"
 #include "timer/timer.h"
 #include "timer/timer_window.h"
+#include "xr_panels.h"
 
 #include "widgets/osk_widget.h"
 
@@ -1854,6 +1855,9 @@ Window::Window(WindowDesc &desc) : window_desc(desc), scale(_gui_scale), mouse_c
  */
 Window *FindWindowFromPt(int x, int y)
 {
+	/* Panels leave the world under the cursor even where the buffer holds a window. */
+	if (IsXRPanelsActive() && _xr_cursor_on_world) return GetMainWindow();
+
 	for (Window *w : Window::IterateFromFront()) {
 		if (MayBeShown(w) && IsInsideBS(x, w->left, w->width) && IsInsideBS(y, w->top, w->height)) {
 			return w;
@@ -2150,6 +2154,9 @@ void ResizeWindow(Window *w, int delta_x, int delta_y, bool clamp_to_screen, boo
  */
 int GetMainViewTop()
 {
+	/* Toolbar and status bar are somewhere in the buffer like any other window, and do not limit it. */
+	if (IsXRPanelsActive()) return 0;
+
 	Window *w = FindWindowById(WindowClass::MainToolbar, 0);
 	return (w == nullptr) ? 0 : w->top + w->height;
 }
@@ -2161,6 +2168,8 @@ int GetMainViewTop()
  */
 int GetMainViewBottom()
 {
+	if (IsXRPanelsActive()) return _screen.height;
+
 	Window *w = FindWindowById(WindowClass::Statusbar, 0);
 	return (w == nullptr) ? _screen.height : w->top;
 }
@@ -3224,6 +3233,8 @@ void UpdateWindows()
 	if (update_before_drawing) update_viewports();
 
 	BeginProof3DFrame();
+	UpdateXRPanels();
+
 	DrawDirtyBlocks();
 	EndProof3DFrame();
 

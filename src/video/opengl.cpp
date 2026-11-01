@@ -29,6 +29,7 @@
 
 #include "opengl.h"
 #include "opengl_es.h"
+#include "../xr_panels.h"
 #include "proof3d.h"
 #include <atomic>
 #ifdef WITH_3D_PROOF
@@ -1151,6 +1152,13 @@ void OpenGLBackend::Paint()
 #else
 	bool layer = false;
 #endif
+#ifdef WITH_3D_PROOF
+	if (layer && IsXRPanelsActive() && !BlitterFactory::GetCurrentBlitter()->NeedsAnimationBuffer()) {
+		DrawProof3DPanels(this->vid_texture, this->vao_quad);
+		_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		return;
+	}
+#endif
 	if (!layer) _glDisable(GL_BLEND);
 
 	/* Blit video buffer to screen. */
@@ -1182,7 +1190,8 @@ void OpenGLBackend::Paint()
  */
 void OpenGLBackend::DrawMouseCursor()
 {
-	if (!this->cursor_in_window) return;
+	/* The cursor is somewhere else in the buffer than what it points at on the screen. */
+	if (!this->cursor_in_window || IsXRPanelsActive()) return;
 
 	/* Draw cursor on screen */
 	_cur_dpi = &_screen;

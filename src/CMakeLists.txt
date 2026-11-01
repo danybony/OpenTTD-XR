@@ -30,6 +30,11 @@ add_subdirectory(video)
 add_subdirectory(widgets)
 
 add_files(
+    xr_panels.cpp
+    xr_panels.h
+)
+
+add_files(
     viewport_sprite_sorter_sse4.cpp
     CONDITION SSE_FOUND
 )

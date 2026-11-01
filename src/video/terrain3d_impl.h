@@ -1134,6 +1134,7 @@ void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, 
 void ToggleTerrain3DTabletop(Viewport &vp)
 {
 	if (vp.camera_3d == ViewportCamera3D::Fixed) {
+		SetXRPanels(false);
 		vp.camera_3d = ViewportCamera3D::Normal;
 		_terrain_bench = {};
 		_terrain_table_half = 0;

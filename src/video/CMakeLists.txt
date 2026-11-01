@@ -23,6 +23,7 @@ if(NOT OPTION_DEDICATED)
         terrain3d_mesh.h
         terrain3d_slots.h
         touch_gesture.h
+        xr_panel_math.h
         rail3d_impl.h
         rail3d_geometry.h
         CONDITION OPENGL_FOUND

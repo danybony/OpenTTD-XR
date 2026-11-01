@@ -43,6 +43,7 @@ PROOF_GL(glMultiDrawArrays);
 PROOF_GL(glDrawArraysInstanced);
 PROOF_GL(glVertexAttribDivisor);
 PROOF_GL(glBlitFramebuffer);
+PROOF_GL(glUniform4fv);
 static PFNGLFRAMEBUFFERTEXTUREMULTIVIEWOVRPROC p_glFramebufferTextureMultiviewOVR = nullptr;
 static PFNGLFRAMEBUFFERTEXTURELAYERPROC p_glFramebufferTextureLayer = nullptr;
 PROOF_GL(glColorMask);
@@ -270,6 +271,7 @@ static bool LoadProofGL()
 	}
 	/* Optional: shadows stay off without them. */
 	BindGLProc(p_glBlitFramebuffer, "glBlitFramebuffer");
+	BindGLProc(p_glUniform4fv, "glUniform4fv");
 	BindGLProc(p_glFramebufferTextureMultiviewOVR, "glFramebufferTextureMultiviewOVR");
 	BindGLProc(p_glFramebufferTextureLayer, "glFramebufferTextureLayer");
 	BindGLProc(p_glColorMask, "glColorMask");
@@ -2702,6 +2704,49 @@ static void VerifyProof3DLayer()
 	if (error != GL_NO_ERROR) Debug(Facility::Driver, Severity::Error, "3D layer reference OpenGL error: {}", error);
 }
 
+/** Draw the windows as panels over the 3D layer, each as its part of the video buffer. */
+void DrawProof3DPanels(GLuint video_texture, GLuint vao)
+{
+	static GLuint program = 0;
+	static GLint corners = -1, rect = -1, texture = -1;
+	if (program == 0) {
+		const char *vertex = R"GLSL(#version 150
+uniform vec4 corners[4]; uniform vec4 rect;
+out vec2 uv;
+void main() {
+ vec2 at=vec2(float(gl_VertexID&1),float(gl_VertexID>>1));
+ uv=mix(rect.xy,rect.zw,at);
+ gl_Position=corners[gl_VertexID];
+})GLSL";
+		const char *fragment = R"GLSL(#version 150
+uniform sampler2D colour_tex;
+in vec2 uv; out vec4 pixel;
+void main() { pixel=texture(colour_tex,uv); })GLSL";
+		program = ProofCompileProgram({vertex}, {fragment});
+		if (program == 0) return;
+		corners = _glGetUniformLocation(program, "corners");
+		rect = _glGetUniformLocation(program, "rect");
+		texture = _glGetUniformLocation(program, "colour_tex");
+	}
+	_glActiveTexture(GL_TEXTURE0);
+	_glBindTexture(GL_TEXTURE_2D, video_texture);
+	/* Panels are rarely exactly one pixel to one pixel. */
+	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	_glUseProgram(program);
+	_glUniform1i(texture, 0);
+	_glBindVertexArray(vao);
+	_glEnable(GL_BLEND);
+	p_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+	for (const auto &panel : GetXRPanelDraws()) {
+		p_glUniform4fv(corners, 4, panel.corners[0].data());
+		p_glUniform4f(rect, panel.uv[0], panel.uv[1], panel.uv[2], panel.uv[3]);
+		_glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	}
+	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+}
+
 /** Run the queued layer draws; called as the 2D buffer is uploaded, so both present the same frame. */
 static void FlushProof3DLayer()
 {
@@ -2769,6 +2814,7 @@ static bool DrawProof3DLayer(GLuint program, GLuint vao)
 /** Re-render changed views into the pixels they own, without redrawing the 2D UI. */
 static void RefreshProof3DLayer()
 {
+	const Window *main_window = GetMainWindow();
 	/* The tile-loop warm-up clears _generating_world before generation is done. */
 	if (HasModalProgress()) return;
 	RefreshProof3DScene();
@@ -2795,7 +2841,7 @@ static void RefreshProof3DLayer()
 		/* A dirty clip may already have rendered this image earlier in the frame. It still
 		 * needs to replace every pixel owned by this view, not just that clip. */
 		if (_proof_layer_revisions[index] == image->revision) continue;
-		_proof_layer_queue.push_back({image->texture, vp.left, vp.top, vp.height, vp.left, vp.top, vp.left + vp.width, vp.top + vp.height, uint8_t(index), false});
+		_proof_layer_queue.push_back({image->texture, vp.left, vp.top, vp.height, vp.left, vp.top, vp.left + vp.width, vp.top + vp.height, uint8_t(index), IsXRPanelsActive() && w == main_window});
 		_proof_layer_revisions[index] = image->revision;
 		++_proof_layer_refreshes;
 	}
@@ -2921,6 +2967,11 @@ void SetTerrain3DGroundFast(bool enabled)
 	_ground_fast = enabled;
 	ClearProofImages();
 	MarkWholeScreenDirty();
+}
+
+void ForgetProof3DImages()
+{
+	ClearProofImages();
 }
 
 void SetProof3DStereo(int mode)

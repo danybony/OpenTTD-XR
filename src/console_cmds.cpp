@@ -92,6 +92,8 @@
 
 #include "table/strings.h"
 
+#include "xr_panels.h"
+
 #include "safeguards.h"
 
 /* scriptfile handling */
@@ -810,6 +812,15 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 			log_view(vp, "fixed");
 			Debug(Facility::Driver, Severity::Error, "PHASE9 EYE vehicle={} eye={},{},{} heading={} pitch={} fov={}", v.index.base(), x, y, z, vp.camera_eye[3], vp.camera_eye[4], fov);
 		});
+	}
+	if (argv.size() == 3 && argv[1] == "panels" && IsProof3DEnabled()) {
+		/* renderer_3d panels on|off|room|view: windows as panels on a tabletop view, staying on the screen or in the room. */
+		if (argv[2] == "room" || argv[2] == "view") {
+			SetXRPanelsRoomAnchored(argv[2] == "room");
+		} else {
+			SetXRPanels(argv[2] == "on");
+		}
+		return true;
 	}
 	if (argv.size() == 2 && argv[1] == "tablecheck") {
 		if (auto *w = GetMainWindow(); w != nullptr && w->viewport != nullptr) CheckTerrain3DTabletopPicking(*w->viewport);
