@@ -466,8 +466,8 @@ bool ClickXRLabel(int x, int y)
 	for (auto it = _labels.rbegin(); it != _labels.rend(); ++it) {
 		if (!it->visible || !IsInsideBS(x, it->on_screen.left, it->on_screen.Width()) || !IsInsideBS(y, it->on_screen.top, it->on_screen.Height())) continue;
 		switch (it->kind) {
-			case WorldLabel::Kind::Town: ShowTownViewWindow(TownID{it->id}); break;
-			case WorldLabel::Kind::Station: ShowStationViewWindow(StationID{it->id}); break;
+			case WorldLabel::Kind::Town: ShowTownViewWindow(TownID{static_cast<uint16_t>(it->id)}); break;
+			case WorldLabel::Kind::Station: ShowStationViewWindow(StationID{static_cast<uint16_t>(it->id)}); break;
 			default: break;
 		}
 		return true;
