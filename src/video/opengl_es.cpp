@@ -255,6 +255,12 @@ static std::string TranslateShader(GLsizei count, const GLchar *const *strings, 
 		}
 	}
 
+	/* Extensions come right after the version, before the precisions below. */
+	static const std::regex extension{R"(#extension[^\n]*\n)"};
+	std::string extensions;
+	for (auto it = std::sregex_iterator(source.begin(), source.end(), extension); it != std::sregex_iterator(); ++it) extensions += it->str();
+	source = std::regex_replace(source, extension, "");
+
 	static const std::regex version{R"(#version 150[^\n]*\n?)"};
 	static const std::regex sampler{R"(\bsampler1D\b)"};
 	static const std::regex lookup{R"(\btexture\((palette|pal), *(\w+)\))"};
@@ -262,7 +268,7 @@ static std::string TranslateShader(GLsizei count, const GLchar *const *strings, 
 	source = std::regex_replace(source, sampler, "sampler2D");
 	source = std::regex_replace(source, lookup, "texture($1, vec2($2, 0.5))");
 
-	return "#version 300 es\n"
+	return "#version 300 es\n" + extensions +
 		"precision highp float;\nprecision highp int;\nprecision highp sampler2D;\nprecision highp usampler2D;\n"
 		"precision highp sampler2DArray;\nprecision highp sampler2DShadow;\n" + source;
 }

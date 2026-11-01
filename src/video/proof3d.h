@@ -104,6 +104,8 @@ std::string AuditCoverage3D();
 void HighlightTerrain3D(int x, int y);
 /** Diagnostics: the perspective draw distance, and a camera orbiting a world point so every frame renders in full. */
 void SetTerrain3DDrawDistance(int tiles);
+/** Diagnostics: perspective views as two side by side views; 0 off, 1 one pass per view, 2 one multiview pass, 3 the same without copying it to the screen. */
+void SetProof3DStereo(int mode);
 /** Diagnostics: draw only a square of this many tiles around the bench target, on black; 0 for the whole world. */
 void SetTerrain3DTable(int tiles);
 /** Diagnostics: one ground texture per tile, without blending across tile edges. */

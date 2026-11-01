@@ -56,7 +56,10 @@ main view orbit its centre in perspective, so every frame renders in full as wit
 a moving head. `renderer_3d drawdistance <tiles>` limits how far it draws,
 `renderer_3d table <tiles>` draws only a square around that centre on black, as a
 tabletop view would, and `renderer_3d groundfast on` skips blending the ground
-across tile edges.
+across tile edges. `renderer_3d stereo 1` shows perspective views as two side by
+side views drawn one after the other, and `renderer_3d stereo 2` draws them in one
+pass with `GL_OVR_multiview2`. `renderer_3d stereo 3` leaves out copying those to
+the screen, which a headset would not need, so the view stays blank.
 
 When testing in the emulator, start it with `-gpu swangle_indirect`. With
 `swiftshader_indirect` the 3D view shows only the clear colour and labels.

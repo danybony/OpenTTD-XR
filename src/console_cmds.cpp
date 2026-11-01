@@ -824,6 +824,10 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 		return true;
 	}
 #endif
+	if (argv.size() == 3 && argv[1] == "stereo") {
+		SetProof3DStereo(argv[2] == "1" ? 1 : argv[2] == "2" ? 2 : argv[2] == "3" ? 3 : 0);
+		return true;
+	}
 	if (argv.size() == 3 && argv[1] == "table") {
 		int tiles = 0;
 		if (std::from_chars(argv[2].data(), argv[2].data() + argv[2].size(), tiles).ec != std::errc{} || tiles < 0) return false;

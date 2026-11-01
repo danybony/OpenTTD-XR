@@ -43,6 +43,8 @@ PROOF_GL(glMultiDrawArrays);
 PROOF_GL(glDrawArraysInstanced);
 PROOF_GL(glVertexAttribDivisor);
 PROOF_GL(glBlitFramebuffer);
+static PFNGLFRAMEBUFFERTEXTUREMULTIVIEWOVRPROC p_glFramebufferTextureMultiviewOVR = nullptr;
+static PFNGLFRAMEBUFFERTEXTURELAYERPROC p_glFramebufferTextureLayer = nullptr;
 PROOF_GL(glColorMask);
 PROOF_GL(glPolygonOffset);
 PROOF_GL(glDrawBuffer);
@@ -268,6 +270,8 @@ static bool LoadProofGL()
 	}
 	/* Optional: shadows stay off without them. */
 	BindGLProc(p_glBlitFramebuffer, "glBlitFramebuffer");
+	BindGLProc(p_glFramebufferTextureMultiviewOVR, "glFramebufferTextureMultiviewOVR");
+	BindGLProc(p_glFramebufferTextureLayer, "glFramebufferTextureLayer");
 	BindGLProc(p_glColorMask, "glColorMask");
 	BindGLProc(p_glPolygonOffset, "glPolygonOffset");
 	BindGLProc(p_glDrawBuffer, "glDrawBuffer");
@@ -349,7 +353,7 @@ static std::vector<ProofInstanceBatch> _proof_instance_batches;
 static std::vector<ProofInstance> _proof_instance_upload;
 /** Locations belong to a linked program and are refreshed when its GL context is recreated. */
 struct ProofLocations {
-	GLint cameraA, cameraB, cameraC, selection, selectedTile, visibility, viewProjection, eye, fog;
+	GLint cameraA, cameraB, cameraC, selection, selectedTile, visibility, viewProjection, viewProjections, eye, fog;
 	GLint modelA, modelB, companyA, companyB, groundTextures, groundMap, groundInfo, groundCrisp, groundFast, groundGrid;
 	GLint shadowMap, shadowMatrix, shadowInfo, shadowFade, autoFocus;
 	std::array<GLint, 6> vertex;
@@ -413,11 +417,19 @@ static void ProofUniform(GLint location, float a, float b, float c, float d)
 static constexpr std::array<float, 3> PROOF_FOG{0.62f, 0.71f, 0.78f};
 static bool _ground_fast = false; ///< Diagnostics: one ground texture per tile.
 static bool _ground_grid = true; ///< Draw the lines between tiles.
+static int _stereo_mode = 0; ///< Diagnostics: perspective views as two side by side views; 0 no, 1 one pass per view, 2 one multiview pass, 3 the same without copying it to the screen.
+static int _stereo_pass = -1; ///< The view being rendered: -1 the only one, 0 and 1 the left and right eye, 2 both at once.
+static bool _stereo_compile = false; ///< Compiling the multiview programs rather than the normal ones.
+static std::array<float, 32> _stereo_matrices{}; ///< View projections of both eyes.
 
 /** Perspective projection and fog; an orthographic camera leaves eye.w at 0 and the shaders keep their own projection. */
 static void ProofPerspectiveUniforms(const ProofLocations &locations, const Terrain3D::Camera &camera)
 {
-	p_glUniformMatrix4fv(locations.viewProjection, 1, GL_FALSE, camera.matrix.data());
+	if (_stereo_pass == 2) {
+		p_glUniformMatrix4fv(locations.viewProjections, 2, GL_FALSE, _stereo_matrices.data());
+	} else {
+		p_glUniformMatrix4fv(locations.viewProjection, 1, GL_FALSE, camera.matrix.data());
+	}
 	ProofUniform(locations.eye, camera.eye.x, camera.eye.y, camera.eye.z, camera.distance);
 	ProofUniform(locations.fog, PROOF_FOG[0], PROOF_FOG[1], PROOF_FOG[2], camera.distance * 0.6f);
 }
@@ -475,6 +487,17 @@ static void ProofShadowUniforms(const ProofLocations &locations)
 	p_glUniformMatrix4fv(locations.shadowMatrix, 1, GL_FALSE, _proof_shadow_matrix.data());
 	ProofUniform(locations.shadowInfo, _proof_shadow_info[0], _proof_shadow_info[1], _proof_shadow_info[2], _proof_shadow_info[3]);
 	ProofUniform(locations.shadowFade, _proof_shadow_fade[0], _proof_shadow_fade[1], _proof_shadow_fade[2], _proof_shadow_fade[3]);
+}
+
+/** A vertex shader as it has to be for what is being compiled: multiview programs project with the matrix of the view they draw. */
+static std::string ProofViewVertexShader(const char *vertex)
+{
+	std::string source{vertex};
+	if (!_stereo_compile) return source;
+	const std::string version = "#version 150\n", matrix = "uniform mat4 viewProjection;";
+	source.replace(source.find(version), version.size(), version + "#extension GL_OVR_multiview2 : require\nlayout(num_views=2) in;\n");
+	source.replace(source.find(matrix), matrix.size(), "uniform mat4 viewProjections[2];\n#define viewProjection viewProjections[gl_ViewID_OVR]\n");
+	return source;
 }
 
 /** Compile a vertex and fragment shader pair; 0 if either fails. */
@@ -640,7 +663,8 @@ void main(){
  }
  pixel=vec4(mix(colour*light*sun,fog.rgb,haze),1);
 })GLSL";
-	_proof_program = ProofCompileProgram({vertex}, {"#version 150\n", PROOF_SUN_GLSL, fragment});
+	const std::string view_vertex = ProofViewVertexShader(vertex);
+	_proof_program = ProofCompileProgram({view_vertex.c_str()}, {"#version 150\n", PROOF_SUN_GLSL, fragment});
 	if (_proof_program == 0) return false;
 	_proof_locations.cameraA = _glGetUniformLocation(_proof_program, "cameraA");
 	_proof_locations.cameraB = _glGetUniformLocation(_proof_program, "cameraB");
@@ -650,6 +674,7 @@ void main(){
 	_proof_locations.visibility = _glGetUniformLocation(_proof_program, "visibility");
 	_proof_locations.autoFocus = _glGetUniformLocation(_proof_program, "autoFocus");
 	_proof_locations.viewProjection = _glGetUniformLocation(_proof_program, "viewProjection");
+	_proof_locations.viewProjections = _glGetUniformLocation(_proof_program, "viewProjections");
 	_proof_locations.eye = _glGetUniformLocation(_proof_program, "eye");
 	_proof_locations.fog = _glGetUniformLocation(_proof_program, "fog");
 	_proof_locations.modelA = _glGetUniformLocation(_proof_program, "modelA");
@@ -668,6 +693,7 @@ void main(){
 	_proof_locations.shadowFade = _glGetUniformLocation(_proof_program, "shadowFade");
 	const char *vertices[] = {"position", "colour", "transparent", "metadata", "world", "layer"};
 	for (size_t i = 0; i < _proof_locations.vertex.size(); ++i) _proof_locations.vertex[i] = _glGetAttribLocation(_proof_program, vertices[i]);
+	if (_stereo_compile) return true;
 	_glGenVertexArrays(1, &_proof_vao);
 	_glGenBuffers(1, &_proof_vbo);
 	_glBindVertexArray(_proof_vao);
@@ -687,12 +713,21 @@ void main(){
 namespace {
 
 /** The camera an image was rendered with, from its key. */
-static Terrain3D::Camera KeyTerrainCamera(const std::array<int, 28> &key)
+static Terrain3D::Camera KeyTerrainCamera(const std::array<int, 28> &key, int stereo = -1)
 {
 	auto bits = [&](int i) { return std::bit_cast<float>(key[i]); };
 	TerrainAngle view{bits(8), bits(9), bits(10), {bits(11), bits(12), bits(13)}, bits(14), bits(15), bits(16), {bits(18), bits(19), bits(20)}, key[17] != 0, bits(21)};
 	view.magnify = bits(27);
-	return TerrainCamera(key[0], key[1], key[2], key[3], key[4], view);
+	if (stereo < 0) return TerrainCamera(key[0], key[1], key[2], key[3], key[4], view);
+	/* Each eye sees half the width, from its own place to either side of the heading. A multiview pass culls with the middle view. */
+	if (stereo != 2) {
+		constexpr float EYE_OFFSET = 27; // Half the distance between the eyes, on a table where a tile is about 2 cm.
+		auto ground = Terrain3D::HeadingForward(view.heading);
+		const float side = stereo == 0 ? -EYE_OFFSET : EYE_OFFSET;
+		view.eye.x += ground[1] * side;
+		view.eye.y -= ground[0] * side;
+	}
+	return TerrainCamera(key[0] / 2, key[1], key[2], key[3], key[4], view);
 }
 
 /** Pixel bounds of a world box in a view, as x0, y0, x1, y1 with rows from the top. */
@@ -984,7 +1019,8 @@ void main() {
  float sun=shadowReceive>0.5?sunLight(shadowPlace,sx,sy):1.0;
  pixel=vec4(mix(tint*sun,fog.rgb,haze),1);
 })GLSL";
-	_proof_instance_program = ProofCompileProgram({vertex}, {"#version 150\n", PROOF_SUN_GLSL, fragment});
+	const std::string view_vertex = ProofViewVertexShader(vertex);
+	_proof_instance_program = ProofCompileProgram({view_vertex.c_str()}, {"#version 150\n", PROOF_SUN_GLSL, fragment});
 	if (_proof_instance_program == 0) {
 		_proof_instance_failed = true;
 		Debug(Facility::Driver, Severity::Error, "3D instance program unavailable; using uniform draws");
@@ -998,6 +1034,7 @@ void main() {
 	_proof_instance_locations.cameraB = _glGetUniformLocation(_proof_instance_program, "cameraB");
 	_proof_instance_locations.cameraC = _glGetUniformLocation(_proof_instance_program, "cameraC");
 	_proof_instance_locations.viewProjection = _glGetUniformLocation(_proof_instance_program, "viewProjection");
+	_proof_instance_locations.viewProjections = _glGetUniformLocation(_proof_instance_program, "viewProjections");
 	_proof_instance_locations.eye = _glGetUniformLocation(_proof_instance_program, "eye");
 	_proof_instance_locations.fog = _glGetUniformLocation(_proof_instance_program, "fog");
 	_proof_instance_locations.shadowMap = _glGetUniformLocation(_proof_instance_program, "shadowMap");
@@ -1788,7 +1825,98 @@ uniform vec4 colour; out vec4 pixel; void main(){pixel=colour;})GLSL";
 static bool DrawProofFade(float dark);
 static bool FinishProofImage(ProofImage &image, bool direct, bool measure_gpu, size_t query);
 
+static bool RenderProofImagePass(ProofImage &image);
+
+/** The two layers a multiview pass draws to, for one size of view. */
+static struct {
+	GLuint fbo = 0, read_fbo = 0, colour = 0, depth = 0;
+	int width = 0, height = 0;
+	GLuint program = 0, instance_program = 0;
+	ProofLocations locations{}, instance_locations{};
+	bool failed = false;
+} _proof_multiview;
+
+static void SwapProofMultiviewPrograms()
+{
+	std::swap(_proof_program, _proof_multiview.program);
+	std::swap(_proof_instance_program, _proof_multiview.instance_program);
+	std::swap(_proof_locations, _proof_multiview.locations);
+	std::swap(_proof_instance_locations, _proof_multiview.instance_locations);
+}
+
+/** Compile the multiview programs and make sure the layers fit the view. */
+static bool PrepareProofMultiview(int width, int height)
+{
+	auto &mv = _proof_multiview;
+	if (mv.failed || p_glFramebufferTextureMultiviewOVR == nullptr || p_glFramebufferTextureLayer == nullptr || p_glTexImage3D == nullptr) return false;
+	if (mv.program == 0) {
+		if (!InitProofProgram() || !InitProofInstanceProgram()) return false;
+		SwapProofMultiviewPrograms();
+		_stereo_compile = true;
+		const bool compiled = InitProofProgram() && InitProofInstanceProgram();
+		_stereo_compile = false;
+		SwapProofMultiviewPrograms();
+		if (!compiled || mv.program == 0 || mv.instance_program == 0) {
+			mv.failed = true;
+			Debug(Facility::Driver, Severity::Error, "3D multiview programs do not compile");
+			return false;
+		}
+		p_glGenFramebuffers(1, &mv.fbo);
+		p_glGenFramebuffers(1, &mv.read_fbo);
+		_glGenTextures(1, &mv.colour);
+		_glGenTextures(1, &mv.depth);
+	}
+	if (mv.width != width || mv.height != height) {
+		_glBindTexture(GL_TEXTURE_2D_ARRAY, mv.colour);
+		p_glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, width, height, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+		_glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		_glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		_glBindTexture(GL_TEXTURE_2D_ARRAY, mv.depth);
+		p_glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH24_STENCIL8, width, height, 2, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
+		_glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		_glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		mv.width = width;
+		mv.height = height;
+		p_glBindFramebuffer(GL_FRAMEBUFFER, mv.fbo);
+		p_glFramebufferTextureMultiviewOVR(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, mv.colour, 0, 0, 2);
+		p_glFramebufferTextureMultiviewOVR(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, mv.depth, 0, 0, 2);
+		if (p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+			mv.failed = true;
+			Debug(Facility::Driver, Severity::Error, "3D multiview framebuffer is incomplete");
+			return false;
+		}
+	}
+	return true;
+}
+
 static bool RenderProofImage(ProofImage &image)
+{
+	if (_stereo_mode == 0 || !LoadProofGL() || !KeyTerrainCamera(image.key).Perspective()) return RenderProofImagePass(image);
+	bool done = false;
+	if (_stereo_mode >= 2) {
+		ProofGLState restore;
+		if (PrepareProofMultiview(image.key[0] / 2, image.key[1])) {
+			for (int eye = 0; eye < 2; eye++) {
+				const auto matrix = KeyTerrainCamera(image.key, eye).matrix;
+				std::copy(matrix.begin(), matrix.end(), _stereo_matrices.begin() + eye * 16);
+			}
+			SwapProofMultiviewPrograms();
+			_stereo_pass = 2;
+			done = RenderProofImagePass(image);
+			_stereo_pass = -1;
+			SwapProofMultiviewPrograms();
+		}
+	} else {
+		_stereo_pass = 0;
+		done = RenderProofImagePass(image);
+		_stereo_pass = 1;
+		done = RenderProofImagePass(image) && done;
+		_stereo_pass = -1;
+	}
+	return done;
+}
+
+static bool RenderProofImagePass(ProofImage &image)
 {
 	if (!LoadProofGL()) return false;
 	ProofGLState restore;
@@ -1826,9 +1954,15 @@ static bool RenderProofImage(ProofImage &image)
 	p_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, direct ? image.texture : _proof_colour, 0);
 	if (p_glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) return false;
 	_glViewport(0, 0, width, height);
+	if (_stereo_pass == 2) {
+		p_glBindFramebuffer(GL_FRAMEBUFFER, _proof_multiview.fbo);
+		_glViewport(0, 0, width / 2, height);
+	} else if (_stereo_pass >= 0) {
+		_glViewport(_stereo_pass * (width / 2), 0, width / 2, height);
+	}
 	_glDisable(GL_BLEND); _glDisable(GL_CULL_FACE); _glDisable(GL_SCISSOR_TEST);
 	_glEnable(GL_DEPTH_TEST); p_glDepthFunc(GL_LESS); p_glDepthMask(GL_TRUE); p_glClearDepth(1);
-	auto camera = KeyTerrainCamera(image.key);
+	auto camera = KeyTerrainCamera(image.key, _stereo_pass);
 	_proof_focus = {};
 	if (image.key[22] != 0) {
 		Vec target{std::bit_cast<float>(image.key[23]), std::bit_cast<float>(image.key[24]), std::bit_cast<float>(image.key[25])};
@@ -1877,7 +2011,7 @@ static bool RenderProofImage(ProofImage &image)
 				{chunk.high.x + reach, chunk.high.y + reach, chunk.high.z});
 			reaches[i] = image.stale.Overlaps(x0, y0, x1, y1);
 		}
-	} else {
+	} else if (_stereo_pass != 1) {
 		_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 	/* A view faded to black in a tunnel draws nothing. */
@@ -2108,6 +2242,19 @@ static bool RenderProofImage(ProofImage &image)
 		p_glStencilMask(0xFF);
 	}
 	if (camera.Perspective() && camera.dark > 0 && !DrawProofFade(camera.dark)) return false;
+	if (_stereo_pass == 2 && _stereo_mode == 3) {
+		/* What a headset would do: it shows the layers as they are. */
+		p_glBindFramebuffer(GL_FRAMEBUFFER, _proof_fbo);
+	} else if (_stereo_pass == 2) {
+		/* Put the layers side by side in the view's own image. */
+		p_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, _proof_fbo);
+		p_glBindFramebuffer(GL_READ_FRAMEBUFFER, _proof_multiview.read_fbo);
+		for (int eye = 0; eye < 2; eye++) {
+			p_glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, _proof_multiview.colour, 0, eye);
+			p_glBlitFramebuffer(0, 0, width / 2, height, eye * (width / 2), 0, eye * (width / 2) + width / 2, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+		p_glBindFramebuffer(GL_FRAMEBUFFER, _proof_fbo);
+	}
 	if (measure_gpu) p_glEndQuery(GL_TIME_ELAPSED);
 	return FinishProofImage(image, direct, measure_gpu, query);
 }
@@ -2772,6 +2919,13 @@ void SetProof3DInstanceStreams(bool enabled)
 void SetTerrain3DGroundFast(bool enabled)
 {
 	_ground_fast = enabled;
+	ClearProofImages();
+	MarkWholeScreenDirty();
+}
+
+void SetProof3DStereo(int mode)
+{
+	_stereo_mode = mode;
 	ClearProofImages();
 	MarkWholeScreenDirty();
 }
