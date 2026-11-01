@@ -448,6 +448,7 @@ static void PressTouch()
 	_touch.pending = false;
 	/* The title bar of a panel moves the panel, rather than the window in the buffer. */
 	if (StartXRPanelDrag(static_cast<int>(_touch.fingers[0].pos.x), static_cast<int>(_touch.fingers[0].pos.y))) return;
+	if (ClickXRLabel(static_cast<int>(_touch.fingers[0].pos.x), static_cast<int>(_touch.fingers[0].pos.y))) return;
 	_touch.pressed = true;
 	_left_button_down = true;
 	HandleMouseEvents();
@@ -625,7 +626,7 @@ bool VideoDriver_SDL_Base::PollEvent()
 
 			switch (ev.button.button) {
 				case SDL_BUTTON_LEFT:
-					if (StartXRPanelDrag(ev.button.x, ev.button.y)) break;
+					if (StartXRPanelDrag(ev.button.x, ev.button.y) || ClickXRLabel(ev.button.x, ev.button.y)) break;
 					_left_button_down = true;
 					break;
 

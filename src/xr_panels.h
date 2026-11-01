@@ -34,6 +34,7 @@ const std::vector<XRPanelDraw> &GetXRPanelDraws();
 Point MapScreenToXRPanels(int x, int y);
 bool StartXRPanelDrag(int x, int y);
 bool IsXRPanelDragging();
+bool ClickXRLabel(int x, int y);
 void MoveXRPanelDrag(int x, int y);
 void EndXRPanelDrag();
 #else
@@ -43,6 +44,7 @@ inline int GetXRAtlasExtraHeight() { return 0; }
 inline Point MapScreenToXRPanels(int x, int y) { return {x, y}; }
 inline bool StartXRPanelDrag(int, int) { return false; }
 inline bool IsXRPanelDragging() { return false; }
+inline bool ClickXRLabel(int, int) { return false; }
 inline void MoveXRPanelDrag(int, int) {}
 inline void EndXRPanelDrag() {}
 #endif

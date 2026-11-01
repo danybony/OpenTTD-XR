@@ -1150,6 +1150,13 @@ void ToggleTerrain3DTabletop(Viewport &vp)
 	StartTerrain3DBench(vp, centre.x, centre.y, TABLETOP_TILES * TILE_SIZE * 0.7f, -50, 60, 0);
 }
 
+void GetTerrain3DTable(float &x, float &y, float &half)
+{
+	x = _terrain_table_x;
+	y = _terrain_table_y;
+	half = _terrain_table_half;
+}
+
 bool IsTerrain3DTabletop(const Viewport &vp)
 {
 	return vp.camera_3d == ViewportCamera3D::Fixed && _terrain_table_half > 0;

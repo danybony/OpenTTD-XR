@@ -22,6 +22,21 @@
 
 #include "gfx_func.h"
 #include "tile_type.h"
+#include "openttd.h"
+#include "company_func.h"
+#include "landscape.h"
+#include "palette_func.h"
+#include "signs_base.h"
+#include "station_base.h"
+#include "station_func.h"
+#include "strings_func.h"
+#include "tilehighlight_func.h"
+#include "town.h"
+#include "transparency.h"
+#include "viewport_func.h"
+#include "waypoint_base.h"
+#include "core/geometry_func.hpp"
+#include "table/strings.h"
 #include "viewport_type.h"
 #include "widget_type.h"
 #include "window_func.h"
@@ -54,6 +69,26 @@ static bool _room_anchored = false;
 static std::vector<Panel> _panels; ///< From the back to the front.
 static std::vector<XRPanelDraw> _draws;
 static Panel *_dragging = nullptr;
+
+/** The name of a town, station or sign, shown where it is on the table. */
+struct WorldLabel {
+	enum class Kind : uint8_t { Town, Station, Waypoint, Sign } kind;
+	uint32_t id; ///< Index of the town, station or sign.
+	std::string text;
+	Colours colour; ///< Colour of its background.
+	Vec position; ///< Where it is in the world.
+	Rect atlas; ///< Where it is drawn in the video buffer.
+	Rect on_screen; ///< Where it was last shown on the screen.
+	bool visible;
+};
+
+/** Height of the part of the video buffer at its bottom for labels. */
+static constexpr int LABEL_ATLAS_HEIGHT = 256;
+/** Frames between looking for labels, as names and what is on the table rarely change. */
+static constexpr int LABEL_REFRESH_FRAMES = 30;
+
+static std::vector<WorldLabel> _labels;
+static int _labels_age = LABEL_REFRESH_FRAMES;
 static int _display_height = 0; ///< Height of the part of the buffer that is the screen.
 static Point _drag_offset{};
 
@@ -116,6 +151,8 @@ void SetXRPanels(bool active)
 	}
 	_panels.clear();
 	_draws.clear();
+	_labels.clear();
+	_labels_age = LABEL_REFRESH_FRAMES;
 	_dragging = nullptr;
 	_display_height = active ? _screen.height : 0;
 	_active = active;
@@ -165,10 +202,74 @@ static void LayoutAtlas()
 			row = 0;
 		}
 		/* When even this is full, later windows overlap the first ones rather than disappear. */
-		MoveWindowTo(w, x, y + w->height > _screen.height ? _display_height : y);
+		MoveWindowTo(w, x, y + w->height > _screen.height - LABEL_ATLAS_HEIGHT ? _display_height : y);
 		x += w->width;
 		row = std::max(row, w->height);
 	}
+}
+
+/** Find the labels that are on the table, and draw those that changed to their part of the video buffer. */
+static void RefreshLabels()
+{
+	float table_x, table_y, table_half;
+	GetTerrain3DTable(table_x, table_y, table_half);
+	auto on_table = [&](int x, int y) { return std::abs(x - table_x) <= table_half && std::abs(y - table_y) <= table_half; };
+
+	std::vector<WorldLabel> labels;
+	auto add = [&](WorldLabel::Kind kind, uint32_t id, std::string &&text, Colours colour, int x, int y, int z) {
+		labels.push_back({kind, id, std::move(text), colour, {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)}, {}, {}, false});
+	};
+	if (_display_opt.Test(DisplayOption::ShowTownNames)) {
+		for (const Town *t : Town::Iterate()) {
+			const int x = TileX(t->xy) * TILE_SIZE + TILE_SIZE / 2, y = TileY(t->xy) * TILE_SIZE + TILE_SIZE / 2;
+			if (on_table(x, y)) add(WorldLabel::Kind::Town, t->index.base(), GetString(STR_TOWN_NAME, t->index), Colours::Grey, x, y, GetSlopePixelZ(x, y));
+		}
+	}
+	const bool hide_others = !_display_opt.Test(DisplayOption::ShowCompetitorSigns);
+	auto colour_of = [](Owner owner) { return owner == OWNER_NONE ? Colours::Grey : _company_colours[owner]; };
+	if (!IsInvisibilitySet(TransparencyOption::Signs)) {
+		for (const BaseStation *st : BaseStation::Iterate()) {
+			const bool station = Station::IsExpected(st);
+			if (!_display_opt.Test(station ? DisplayOption::ShowStationNames : DisplayOption::ShowWaypointNames)) continue;
+			if (hide_others && _local_company != st->owner && st->owner != OWNER_NONE) continue;
+			const int x = TileX(st->xy) * TILE_SIZE + TILE_SIZE / 2, y = TileY(st->xy) * TILE_SIZE + TILE_SIZE / 2;
+			if (!on_table(x, y)) continue;
+			add(station ? WorldLabel::Kind::Station : WorldLabel::Kind::Waypoint, st->index.base(), GetString(station ? STR_STATION_NAME : STR_WAYPOINT_NAME, st->index), colour_of(st->owner), x, y, GetSlopePixelZ(x, y));
+		}
+		if (_display_opt.Test(DisplayOption::ShowSigns)) {
+			for (const Sign *si : Sign::Iterate()) {
+				if (on_table(si->x, si->y)) add(WorldLabel::Kind::Sign, si->index.base(), GetString(STR_SIGN_NAME, si->index), colour_of(si->owner), si->x, si->y, si->z);
+			}
+		}
+	}
+
+	const bool same = labels.size() == _labels.size() && std::equal(labels.begin(), labels.end(), _labels.begin(), [](const WorldLabel &a, const WorldLabel &b) {
+		return a.kind == b.kind && a.id == b.id && a.text == b.text && a.colour == b.colour;
+	});
+	if (same) return;
+
+	/* Lay them out in rows at the bottom of the buffer, and draw them there. No window ever touches that part. */
+	const int padding = 2 * _gui_scale / 100, row_height = GetCharacterHeight(FontSize::Normal) + 2 * padding;
+	int x = 0, y = _screen.height - LABEL_ATLAS_HEIGHT;
+	DrawPixelInfo *backup = _cur_dpi;
+	_cur_dpi = &_screen;
+	GfxFillRect(0, y, _screen.width - 1, _screen.height - 1, PC_BLACK);
+	for (auto &label : labels) {
+		const int width = GetStringBoundingBox(label.text).width + 2 * padding;
+		if (x + width > _screen.width) {
+			x = 0;
+			y += row_height;
+		}
+		/* There is no room for the rest of the labels, for which there will rarely be room on the screen either. */
+		if (y + row_height > _screen.height) break;
+		label.atlas = {x, y, x + width - 1, y + row_height - 1};
+		GfxFillRect(label.atlas.left, label.atlas.top, label.atlas.right, label.atlas.bottom, GetColourGradient(label.colour, Shade::Dark));
+		DrawString(label.atlas.left + padding, label.atlas.right - padding, label.atlas.top + padding, label.text, TextColour::White, AlignmentH::ForceLeft);
+		x += width;
+	}
+	_cur_dpi = backup;
+	VideoDriver::GetInstance()->MakeDirty(0, _screen.height - LABEL_ATLAS_HEIGHT, _screen.width, LABEL_ATLAS_HEIGHT);
+	_labels = std::move(labels);
 }
 
 void UpdateXRPanels()
@@ -220,6 +321,33 @@ void UpdateXRPanels()
 	const Viewport &vp = *main->viewport;
 	_draws.clear();
 	const float buffer_width = static_cast<float>(_screen.width), buffer_height = static_cast<float>(_screen.height);
+
+	if (++_labels_age >= LABEL_REFRESH_FRAMES) {
+		_labels_age = 0;
+		RefreshLabels();
+	}
+	for (auto &label : _labels) {
+		label.visible = false;
+		if (label.atlas.Width() <= 1) continue;
+		std::array<float, 4> anchor;
+		for (int row = 0; row < 4; row++) {
+			const auto r = c.camera.Row(row);
+			anchor[row] = r[0] * label.position.x + r[1] * label.position.y + r[2] * label.position.z + r[3];
+		}
+		if (anchor[3] <= 0.01f) continue;
+		/* Always the same size on the screen, standing just above its place, and on whole pixels so text stays sharp. */
+		const int width = label.atlas.Width(), height = label.atlas.Height();
+		const int left = static_cast<int>(std::round((anchor[0] / anchor[3] + 1) * vp.width / 2 - width / 2.0f));
+		const int top = static_cast<int>(std::round((1 - anchor[1] / anchor[3]) * vp.height / 2)) - height;
+		if (left + width < 0 || top + height < 0 || left >= vp.width || top >= vp.height) continue;
+		label.on_screen = {left, top, left + width - 1, top + height - 1};
+		label.visible = true;
+		auto corner = [&](int x, int y) { return std::array<float, 4>{x * 2.0f / vp.width - 1, 1 - y * 2.0f / vp.height, 0, 1}; };
+		_draws.push_back({{corner(left, top), corner(left + width, top), corner(left, top + height), corner(left + width, top + height)},
+			{label.atlas.left / buffer_width, label.atlas.top / buffer_height, (label.atlas.right + 1) / buffer_width, (label.atlas.bottom + 1) / buffer_height},
+			false, false});
+	}
+
 	for (auto &panel : _panels) {
 		const Window *w = panel.window;
 		const int total_height = w->height + panel.grip_height;
@@ -326,6 +454,25 @@ bool StartXRPanelDrag(int x, int y)
 	_dragging = panel;
 	_drag_offset = {x, y};
 	return true;
+}
+
+bool ClickXRLabel(int x, int y)
+{
+	/* With a construction tool in hand, the tile under the label is what is meant. */
+	if (!_active || _thd.place_mode != HT_NONE) return false;
+	Point in_buffer;
+	bool on_grip;
+	if (FindPanelAt(x, y, in_buffer, on_grip) != nullptr) return false;
+	for (auto it = _labels.rbegin(); it != _labels.rend(); ++it) {
+		if (!it->visible || !IsInsideBS(x, it->on_screen.left, it->on_screen.Width()) || !IsInsideBS(y, it->on_screen.top, it->on_screen.Height())) continue;
+		switch (it->kind) {
+			case WorldLabel::Kind::Town: ShowTownViewWindow(TownID{it->id}); break;
+			case WorldLabel::Kind::Station: ShowStationViewWindow(StationID{it->id}); break;
+			default: break;
+		}
+		return true;
+	}
+	return false;
 }
 
 bool IsXRPanelDragging()
