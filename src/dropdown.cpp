@@ -184,7 +184,10 @@ struct DropdownWindow : Window {
 		this->FinishInitNested(0);
 
 		if (this->options.Test(DropDownOption::Filterable)) {
+#ifndef __ANDROID__
+			/* On a touch screen this would cover half the screen with a keyboard; tapping the filter brings it up when wanted. */
 			this->SetFocusedWidget(WID_DM_FILTER);
+#endif
 			if (this->persistent_filter_text != nullptr && !this->persistent_filter_text->empty()) {
 				this->editbox.text.Assign(*this->persistent_filter_text);
 				this->UpdateFilter();

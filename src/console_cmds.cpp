@@ -811,6 +811,10 @@ static bool ConRenderer3D(std::span<std::string_view> argv)
 			Debug(Facility::Driver, Severity::Error, "PHASE9 EYE vehicle={} eye={},{},{} heading={} pitch={} fov={}", v.index.base(), x, y, z, vp.camera_eye[3], vp.camera_eye[4], fov);
 		});
 	}
+	if (argv.size() == 2 && argv[1] == "tablecheck") {
+		if (auto *w = GetMainWindow(); w != nullptr && w->viewport != nullptr) CheckTerrain3DTabletopPicking(*w->viewport);
+		return true;
+	}
 	if (argv.size() == 2 && argv[1] == "tabletop" && IsProof3DEnabled()) {
 		if (auto *w = GetMainWindow(); w != nullptr && w->viewport != nullptr) ToggleTerrain3DTabletop(*w->viewport);
 		return true;

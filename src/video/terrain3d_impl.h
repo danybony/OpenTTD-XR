@@ -1151,7 +1151,33 @@ void ToggleTerrain3DTabletop(Viewport &vp)
 
 bool IsTerrain3DTabletop(const Viewport &vp)
 {
-	return vp.camera_3d == ViewportCamera3D::Fixed;
+	return vp.camera_3d == ViewportCamera3D::Fixed && _terrain_table_half > 0;
+}
+
+void CheckTerrain3DTabletopPicking(const Viewport &vp)
+{
+	if (!IsTerrain3DTabletop(vp)) return;
+	const auto camera = ViewportTerrainCamera(vp);
+	int checks = 0, misses = 0, wrong = 0, offscreen = 0;
+	for (uint y = 0; y < Map::SizeY(); ++y) {
+		for (uint x = 0; x < Map::SizeX(); ++x) {
+			const int cx = x * TILE_SIZE + TILE_SIZE / 2, cy = y * TILE_SIZE + TILE_SIZE / 2;
+			if (std::abs(cx - _terrain_table_x) > _terrain_table_half || std::abs(cy - _terrain_table_y) > _terrain_table_half) continue;
+			const auto p = camera.Project({static_cast<float>(cx), static_cast<float>(cy), static_cast<float>(GetSlopePixelZ(cx, cy))});
+			if (p.x < 0 || p.y < 0 || p.x >= vp.width || p.y >= vp.height) {
+				++offscreen;
+				continue;
+			}
+			++checks;
+			const Point hit = PickTerrain3D(vp, vp.left + static_cast<int>(p.x), vp.top + static_cast<int>(p.y), false);
+			if (hit.x < 0) {
+				++misses;
+			} else if (static_cast<uint>(hit.x) / TILE_SIZE != x || static_cast<uint>(hit.y) / TILE_SIZE != y) {
+				++wrong;
+			}
+		}
+	}
+	Debug(Facility::Driver, Severity::Error, "TABLETOP pick checks={} misses={} wrong={} offscreen={}", checks, misses, wrong, offscreen);
 }
 
 bool Terrain3DTouchGesture(Viewport &vp, float pan_x, float pan_y, float scale, float rotate)
@@ -1241,10 +1267,11 @@ Point ProjectTerrain3DLabel(const Viewport &vp, int x, int y, int z)
 Point PickTerrain3D(const Viewport &vp, int x, int y, bool clamp_to_map)
 {
 	/* Cab and chase views have no picking: nothing under the cursor, so no highlight or tool target. */
-	if (vp.camera_3d != ViewportCamera3D::Normal) return {-1, -1};
+	const bool tabletop = IsTerrain3DTabletop(vp);
+	if (vp.camera_3d != ViewportCamera3D::Normal && !tabletop) return {-1, -1};
 	/* Construction uses the authoritative ground inverse, exactly as classic does.
 	 * Roof/deck geometry must not move the tool onto an adjacent tile. */
-	if (_terrain_yaw == 0 && _terrain_tilt == 100 && _terrain_magnify == 1) return InverseRemapCoords2(
+	if (!tabletop && _terrain_yaw == 0 && _terrain_tilt == 100 && _terrain_magnify == 1) return InverseRemapCoords2(
 		ScaleByZoom(x - vp.left, vp.zoom) + vp.virtual_left,
 		ScaleByZoom(y - vp.top, vp.zoom) + vp.virtual_top, clamp_to_map);
 	RefreshTerrain();
@@ -1253,6 +1280,8 @@ Point PickTerrain3D(const Viewport &vp, int x, int y, bool clamp_to_map)
 	float closest=-1e30f;
 	Point result{-1,-1};
 	for (const auto &chunk : _terrain_chunks) {
+		/* A table only has the chunks it draws. */
+		if (tabletop && !Terrain3D::Visible(chunk.low, chunk.high, camera)) continue;
 		if (!Terrain3D::HitBox(camera, chunk.low, chunk.high, float(x - vp.left), float(y - vp.top))) continue;
 		for (const auto &face : chunk.faces) {
 			if (!face.ground) continue;
@@ -1267,7 +1296,7 @@ Point PickTerrain3D(const Viewport &vp, int x, int y, bool clamp_to_map)
 			result={std::clamp(int(wx),int(TileX(face.tile)*TILE_SIZE),int(TileX(face.tile)*TILE_SIZE+15)),std::clamp(int(wy),int(TileY(face.tile)*TILE_SIZE),int(TileY(face.tile)*TILE_SIZE+15))};
 		}
 	}
-	if (result.x < 0 && clamp_to_map) {
+	if (result.x < 0 && clamp_to_map && !tabletop) {
 		/* Scroll/zoom requests outside the island still get a valid edge location.
 		 * Ordinary clicks deliberately keep the miss, rather than building at an edge. */
 		auto delta = Terrain3D::ClassicScrollDelta((x - vp.left - vp.width / 2.0f) / camera.scale,
@@ -1284,7 +1313,7 @@ Point PickTerrain3D(const Viewport &vp, int x, int y, bool clamp_to_map)
 
 Vehicle *PickVehicle3D(const Viewport &vp, int x, int y)
 {
-	if (vp.camera_3d != ViewportCamera3D::Normal || x < vp.left || y < vp.top || x >= vp.left + vp.width || y >= vp.top + vp.height) return nullptr;
+	if ((vp.camera_3d != ViewportCamera3D::Normal && !IsTerrain3DTabletop(vp)) || x < vp.left || y < vp.top || x >= vp.left + vp.width || y >= vp.top + vp.height) return nullptr;
 	RefreshTrains3D();
 	auto camera = ViewportTerrainCamera(vp);
 	float closest = -1e30f;
@@ -1344,7 +1373,7 @@ void CheckTerrain3DManagement(std::string_view tag)
 		auto camera = ViewportTerrainCamera(vp);
 		int checks = 0, failures = 0, occluded = 0, slopes = 0, foundations = 0, bridges = 0;
 		auto start = std::chrono::steady_clock::now();
-		if (vp.camera_3d != ViewportCamera3D::Normal) {
+		if (vp.camera_3d != ViewportCamera3D::Normal && !IsTerrain3DTabletop(vp)) {
 			for (int y = 1; y <= 3; ++y) for (int x = 1; x <= 3; ++x) {
 				int sx = vp.left + vp.width * x / 4, sy = vp.top + vp.height * y / 4;
 				++checks;

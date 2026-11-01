@@ -2747,7 +2747,7 @@ static void PlaceObject()
 bool HandleViewportClicked(const Viewport &vp, int x, int y)
 {
 	/* Cab and chase views are only for watching. */
-	if (IsProof3DEnabled() && vp.camera_3d != ViewportCamera3D::Normal) return true;
+	if (IsProof3DEnabled() && vp.camera_3d != ViewportCamera3D::Normal && !IsTerrain3DTabletop(vp)) return true;
 
 	const Vehicle *v = CheckClickOnVehicle(vp, x, y);
 
@@ -2761,7 +2761,8 @@ bool HandleViewportClicked(const Viewport &vp, int x, int y)
 		return true;
 	}
 
-	if (CheckClickOnViewportSign(vp, x, y)) return true;
+	/* A table shows no labels to click yet. */
+	if (!IsTerrain3DTabletop(vp) && CheckClickOnViewportSign(vp, x, y)) return true;
 	/* A projected vehicle target owns its click; opening the structure beneath
 	 * it as well would dispatch two management actions from one 3D selection. */
 	bool result = v != nullptr && IsProof3DEnabled() ? true : CheckClickOnLandscape(vp, x, y);

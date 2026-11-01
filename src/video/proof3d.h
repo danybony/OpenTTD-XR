@@ -114,6 +114,8 @@ void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, 
 /** A small part of the map seen as a model on a table, or back to the normal camera. */
 void ToggleTerrain3DTabletop(Viewport &vp);
 bool IsTerrain3DTabletop(const Viewport &vp);
+/** Diagnostics: project the middle of each tile on the table to the screen, and check that picking gives that tile back. */
+void CheckTerrain3DTabletopPicking(const Viewport &vp);
 /** Apply a two finger gesture to a tabletop view: the table moves, turns and grows under the fingers. False for other views. */
 bool Terrain3DTouchGesture(Viewport &vp, float pan_x, float pan_y, float scale, float rotate);
 bool UpdateViewportCamera3D(Viewport &vp, uint32_t delta_ms);
