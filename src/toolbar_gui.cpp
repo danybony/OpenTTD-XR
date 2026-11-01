@@ -265,6 +265,7 @@ enum Camera3DMenu {
 	C3M_SHADOWS_OFF, C3M_SHADOWS_CONTACT, C3M_SHADOWS_SUN, ///< Shadow preference 0, 1 and 2.
 	C3M_AUTO_VISIBILITY,
 	C3M_RETRO,
+	C3M_TABLETOP,
 };
 
 static void ShowCamera3DMenu(Window *w)
@@ -284,6 +285,8 @@ static void ShowCamera3DMenu(Window *w)
 	list.push_back(MakeDropDownListCheckedItem(_settings_client.gui.renderer_3d_shadows == 2, STR_3D_SHADOWS_SUN, C3M_SHADOWS_SUN));
 	list.push_back(MakeDropDownListStringItem(STR_3D_RETRO_TITLE, C3M_RETRO));
 	list.push_back(MakeDropDownListDividerItem());
+	const Window *main_window = GetMainWindow();
+	list.push_back(MakeDropDownListCheckedItem(main_window != nullptr && main_window->viewport != nullptr && IsTerrain3DTabletop(*main_window->viewport), STR_3D_TABLETOP, C3M_TABLETOP, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_CLASSIC, C3M_CLASSIC, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_ORBIT, C3M_ORBIT, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_LEFT, C3M_LEFT, !enabled));
@@ -323,6 +326,9 @@ static void SelectCamera3DMenu(int index)
 		case C3M_TILT_DOWN: OrbitTerrain3DCamera(0, -10, true); break;
 		case C3M_HELP: AllocateWindowDescFront<Camera3DHelpWindow>(_3d_help_desc, 1); break;
 		case C3M_RETRO: AllocateWindowDescFront<Retro3DWindow>(_3d_retro_desc, 0); break;
+		case C3M_TABLETOP:
+			if (Window *main_window = GetMainWindow(); IsProof3DEnabled() && main_window != nullptr && main_window->viewport != nullptr) ToggleTerrain3DTabletop(*main_window->viewport);
+			break;
 		case C3M_SHADOWS_OFF: case C3M_SHADOWS_CONTACT: case C3M_SHADOWS_SUN:
 			SetSettingValue(GetSettingFromName("gui.renderer_3d_shadows")->AsIntSetting(), index - C3M_SHADOWS_OFF);
 			break;

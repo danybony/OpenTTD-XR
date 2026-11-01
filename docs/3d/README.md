@@ -61,6 +61,13 @@ across tile edges.
 When testing in the emulator, start it with `-gpu swangle_indirect`. With
 `swiftshader_indirect` the 3D view shows only the clear colour and labels.
 
+## Touch
+
+One finger acts as the mouse. Two fingers pan, pinch to zoom and turn the main
+view, or in the tabletop view from the 3D menu move, grow and turn the table.
+`renderer_3d fingers <pan x> <pan y> <scale> <degrees clockwise>` feeds such a
+gesture through the event queue, for testing without two real fingers.
+
 ## Testing without a GPU
 
 Mesa software rendering is refused by default. For a local test build, configure

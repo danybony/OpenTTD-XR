@@ -32,6 +32,8 @@ bool MarkAllViewportsDirty(int left, int top, int right, int bottom);
 
 bool DoZoomInOutWindow(ZoomStateChange how, Window *w);
 void ZoomInOrOutToCursorWindow(bool in, Window * w);
+void HandleTwoFingerGesture(float pan_x, float pan_y, float scale, float rotate);
+void EndTwoFingerGesture();
 void ConstrainAllViewportsZoom();
 Point GetTileZoomCenterWindow(bool in, Window * w);
 void FixTitleGameZoom(int zoom_adjust = 0);

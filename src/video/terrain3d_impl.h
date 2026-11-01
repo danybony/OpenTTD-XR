@@ -1089,10 +1089,21 @@ static std::pair<int, int> RideState3D(const Vehicle &v)
 
 /** Ease a chase or cab view towards its vehicle once per frame, fading it out in tunnels, and return it to normal
  * when the ride ends; presentation only. Returns whether its camera moved. */
-/** A camera orbiting a point at a constant height, so every frame renders the whole scene as a moving head would. */
+/** A camera orbiting a point at a constant height: the tabletop view, and a benchmark that renders the whole scene each frame as a moving head would. */
 static struct {
-	float target_x, target_y, radius, spin;
+	float target_x, target_y, radius, spin, height;
 } _terrain_bench{};
+
+/** Put the orbiting camera where its target, distance and heading say, keeping its pitch and field of view. */
+static void PlaceTerrain3DOrbit(Viewport &vp, float heading)
+{
+	auto forward = Terrain3D::HeadingForward(heading);
+	vp.camera_eye = {_terrain_bench.target_x - forward[0] * _terrain_bench.radius, _terrain_bench.target_y - forward[1] * _terrain_bench.radius,
+		GetSlopePixelZOutsideMap(static_cast<int>(_terrain_bench.target_x), static_cast<int>(_terrain_bench.target_y)) + _terrain_bench.height,
+		heading, vp.camera_eye[4], vp.camera_eye[5]};
+	_terrain_table_x = _terrain_bench.target_x;
+	_terrain_table_y = _terrain_bench.target_y;
+}
 
 void SetTerrain3DTable(int tiles)
 {
@@ -1111,24 +1122,69 @@ void SetTerrain3DDrawDistance(int tiles)
 void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, float fov, float spin)
 {
 	const float radius = height / std::tan(std::abs(pitch) * 3.14159265359f / 180);
-	const float z = GetSlopePixelZOutsideMap(x, y) + height;
-	const float heading = 45;
-	auto forward = Terrain3D::HeadingForward(heading);
-	_terrain_bench = {static_cast<float>(x), static_cast<float>(y), radius, spin};
-	_terrain_table_x = static_cast<float>(x);
-	_terrain_table_y = static_cast<float>(y);
+	_terrain_bench = {static_cast<float>(x), static_cast<float>(y), radius, spin, height};
 	vp.camera_3d = ViewportCamera3D::Fixed;
-	vp.camera_eye = {x - forward[0] * radius, y - forward[1] * radius, z, heading, pitch, fov};
+	vp.camera_eye[4] = pitch;
+	vp.camera_eye[5] = fov;
+	PlaceTerrain3DOrbit(vp, 45);
+	/* Labels and the like drawn for the previous camera must not linger in the 2D buffer. */
+	MarkWholeScreenDirty();
+}
+
+void ToggleTerrain3DTabletop(Viewport &vp)
+{
+	if (vp.camera_3d == ViewportCamera3D::Fixed) {
+		vp.camera_3d = ViewportCamera3D::Normal;
+		_terrain_bench = {};
+		_terrain_table_half = 0;
+		_terrain_draw_distance = 64 * TILE_SIZE;
+		SetTerrain3DGroundFast(false);
+		MarkWholeScreenDirty();
+		return;
+	}
+	constexpr int TABLETOP_TILES = 32;
+	Point centre = PickTerrain3D(vp, vp.left + vp.width / 2, vp.top + vp.height / 2, true);
+	SetTerrain3DTable(TABLETOP_TILES);
+	SetTerrain3DGroundFast(true);
+	StartTerrain3DBench(vp, centre.x, centre.y, TABLETOP_TILES * TILE_SIZE * 0.7f, -50, 60, 0);
+}
+
+bool IsTerrain3DTabletop(const Viewport &vp)
+{
+	return vp.camera_3d == ViewportCamera3D::Fixed;
+}
+
+bool Terrain3DTouchGesture(Viewport &vp, float pan_x, float pan_y, float scale, float rotate)
+{
+	if (vp.camera_3d != ViewportCamera3D::Fixed) return false;
+
+	auto &orbit = _terrain_bench;
+	orbit.spin = 0;
+
+	constexpr float DEGREES = 3.14159265359f / 180;
+	/* What is under the fingers stays under them: a pixel at the target covers this much of the ground across the view,
+	 * and more of it along the view, which the camera sees at a slant. */
+	const float across = 2 * std::hypot(orbit.radius, orbit.height) * std::tan(vp.camera_eye[5] * DEGREES / 2) / std::max(vp.height, 1);
+	const float along = across / std::max(std::sin(std::abs(vp.camera_eye[4]) * DEGREES), 0.1f);
+	auto forward = Terrain3D::HeadingForward(vp.camera_eye[3]);
+	orbit.target_x += -forward[1] * pan_x * across + forward[0] * pan_y * along;
+	orbit.target_y += forward[0] * pan_x * across + forward[1] * pan_y * along;
+	orbit.target_x = std::clamp(orbit.target_x, 0.0f, static_cast<float>(Map::SizeX() * TILE_SIZE));
+	orbit.target_y = std::clamp(orbit.target_y, 0.0f, static_cast<float>(Map::SizeY() * TILE_SIZE));
+
+	const float height = std::clamp(orbit.height / scale, 8.0f * TILE_SIZE, 128.0f * TILE_SIZE);
+	orbit.radius *= height / orbit.height;
+	orbit.height = height;
+
+	/* The camera turns the opposite way to what it shows, and the ground should follow the fingers. */
+	PlaceTerrain3DOrbit(vp, vp.camera_eye[3] - rotate);
+	return true;
 }
 
 bool UpdateViewportCamera3D(Viewport &vp, uint32_t delta_ms)
 {
 	if (vp.camera_3d == ViewportCamera3D::Fixed && _terrain_bench.spin != 0) {
-		const float heading = vp.camera_eye[3] + _terrain_bench.spin;
-		auto forward = Terrain3D::HeadingForward(heading);
-		vp.camera_eye[0] = _terrain_bench.target_x - forward[0] * _terrain_bench.radius;
-		vp.camera_eye[1] = _terrain_bench.target_y - forward[1] * _terrain_bench.radius;
-		vp.camera_eye[3] = heading;
+		PlaceTerrain3DOrbit(vp, vp.camera_eye[3] + _terrain_bench.spin);
 		/* The camera is part of the view's image key: the 3D layer refreshes by itself and the 2D buffer stays as it is. */
 		return false;
 	}

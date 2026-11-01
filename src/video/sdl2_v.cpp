@@ -19,7 +19,9 @@
 #include "../fileio_func.h"
 #include "../framerate_type.h"
 #include "../window_func.h"
+#include "../viewport_func.h"
 #include "sdl2_v.h"
+#include "touch_gesture.h"
 #include <SDL.h>
 #ifdef __EMSCRIPTEN__
 #	include <emscripten.h>
@@ -414,13 +416,147 @@ static uint ConvertSdlKeycodeIntoMy(SDL_Keycode kc)
 	return key;
 }
 
+/** Fingers on the screen: one acts as the mouse, two move the view. */
+static struct {
+	struct Finger {
+		SDL_FingerID id;
+		TouchPoint pos;
+	};
+	std::array<Finger, 2> fingers{};
+	int count = 0; ///< Number of fingers on the screen that are tracked.
+	bool gesture = false; ///< Two fingers have touched since the screen was last free, so nothing clicks until it is free again.
+	bool pending = false; ///< One finger touched and it is too early to tell whether a second one is coming.
+	bool pressed = false; ///< One finger acts as the pressed left mouse button.
+	TouchPoint start{}; ///< Where the pending finger touched.
+	std::chrono::steady_clock::time_point since{}; ///< When the pending finger touched.
+} _touch;
+
+/** Moving this many pixels, or holding this long, makes a single finger a press rather than the start of a gesture. */
+static constexpr float TOUCH_PRESS_DISTANCE = 12;
+static constexpr auto TOUCH_PRESS_DELAY = std::chrono::milliseconds(100);
+
+static void PressTouch()
+{
+	_touch.pending = false;
+	_touch.pressed = true;
+	_left_button_down = true;
+	HandleMouseEvents();
+}
+
+static void ReleaseTouch()
+{
+	_touch.pressed = false;
+	_left_button_down = false;
+	_left_button_clicked = false;
+	HandleMouseEvents();
+}
+
+static void MoveTouchCursor(TouchPoint pos)
+{
+	_cursor.in_window = true;
+	_cursor.UpdateCursorPosition(static_cast<int>(pos.x), static_cast<int>(pos.y));
+	HandleMouseEvents();
+}
+
+static void HandleFingerEvent(const SDL_TouchFingerEvent &finger)
+{
+	const TouchPoint pos{finger.x * _screen.width, finger.y * _screen.height};
+	auto tracked = std::find_if(_touch.fingers.begin(), _touch.fingers.begin() + _touch.count, [&](const auto &f) { return f.id == finger.fingerId; });
+	const bool known = tracked != _touch.fingers.begin() + _touch.count;
+
+	switch (finger.type) {
+		case SDL_FINGERDOWN:
+			if (_touch.count == static_cast<int>(_touch.fingers.size())) break;
+			_touch.fingers[_touch.count++] = {finger.fingerId, pos};
+			if (_touch.count == 1) {
+				_touch.pending = true;
+				_touch.start = pos;
+				_touch.since = std::chrono::steady_clock::now();
+				MoveTouchCursor(pos);
+			} else {
+				_touch.pending = false;
+				_touch.gesture = true;
+				if (_touch.pressed) ReleaseTouch();
+			}
+			break;
+
+		case SDL_FINGERMOTION:
+			if (!known) break;
+			if (_touch.count == 2) {
+				const auto other = _touch.fingers[tracked == _touch.fingers.begin() ? 1 : 0].pos;
+				const auto step = GetTwoFingerStep(tracked->pos, other, pos, other);
+				HandleTwoFingerGesture(step.pan_x, step.pan_y, step.scale, step.rotate);
+			} else if (!_touch.gesture) {
+				if (_touch.pending && std::hypot(pos.x - _touch.start.x, pos.y - _touch.start.y) >= TOUCH_PRESS_DISTANCE) PressTouch();
+				if (_touch.pressed) MoveTouchCursor(pos);
+			}
+			tracked->pos = pos;
+			break;
+
+		case SDL_FINGERUP:
+			if (!known) break;
+			/* A short tap never got to be a press, but is a click all the same. */
+			if (_touch.pending) PressTouch();
+			if (_touch.pressed) ReleaseTouch();
+			*tracked = _touch.fingers[_touch.count - 1];
+			if (--_touch.count == 0 && _touch.gesture) {
+				_touch.gesture = false;
+				EndTwoFingerGesture();
+			}
+			break;
+
+		default: break;
+	}
+}
+
+/**
+ * Feed a two finger gesture through the event queue, for testing without two real fingers.
+ * @param pan_x Pixels to move to the right.
+ * @param pan_y Pixels to move down.
+ * @param scale How many times further apart the fingers end up.
+ * @param rotate Degrees to turn clockwise.
+ */
+void PushTwoFingerTestGesture(float pan_x, float pan_y, float scale, float rotate)
+{
+	constexpr int STEPS = 10;
+	auto send = [](Uint32 type, SDL_FingerID id, float x, float y) {
+		SDL_Event ev{};
+		ev.tfinger.type = type;
+		ev.tfinger.fingerId = id;
+		ev.tfinger.x = x / _screen.width;
+		ev.tfinger.y = y / _screen.height;
+		SDL_PushEvent(&ev);
+	};
+	auto at = [&](int step, float sign) {
+		const float t = static_cast<float>(step) / STEPS;
+		const float angle = rotate * t * 3.14159265359f / 180, radius = _screen.height * 0.2f * std::pow(scale, t) * sign;
+		return TouchPoint{_screen.width * 0.5f + pan_x * t + radius * std::cos(angle), _screen.height * 0.5f + pan_y * t + radius * std::sin(angle)};
+	};
+	send(SDL_FINGERDOWN, 1, at(0, 1).x, at(0, 1).y);
+	send(SDL_FINGERDOWN, 2, at(0, -1).x, at(0, -1).y);
+	for (int i = 1; i <= STEPS; i++) {
+		send(SDL_FINGERMOTION, 1, at(i, 1).x, at(i, 1).y);
+		send(SDL_FINGERMOTION, 2, at(i, -1).x, at(i, -1).y);
+	}
+	send(SDL_FINGERUP, 1, at(STEPS, 1).x, at(STEPS, 1).y);
+	send(SDL_FINGERUP, 2, at(STEPS, -1).x, at(STEPS, -1).y);
+}
+
 bool VideoDriver_SDL_Base::PollEvent()
 {
 	SDL_Event ev;
 
+	if (_touch.pending && std::chrono::steady_clock::now() - _touch.since >= TOUCH_PRESS_DELAY) PressTouch();
+
 	if (!SDL_PollEvent(&ev)) return false;
 
 	switch (ev.type) {
+		case SDL_FINGERDOWN:
+		case SDL_FINGERMOTION:
+		case SDL_FINGERUP:
+			HandleFingerEvent(ev.tfinger);
+			break;
+
 		case SDL_MOUSEMOTION: {
 			int32_t x = ev.motion.x;
 			int32_t y = ev.motion.y;
@@ -585,6 +721,11 @@ static std::optional<std::string_view> InitializeSDL()
 
 #ifdef SDL_HINT_APP_NAME
 	SDL_SetHint(SDL_HINT_APP_NAME, "OpenTTD");
+#endif
+
+	/* Touches are handled below rather than arriving as a mouse. */
+#ifndef __EMSCRIPTEN__
+	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
 
 	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) return SDL_GetError();

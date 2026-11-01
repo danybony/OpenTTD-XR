@@ -20,5 +20,6 @@ add_test_files(
     test_window_desc.cpp
     tilearea.cpp
     terrain3d.cpp
+    touch_gesture.cpp
     utf8.cpp
 )

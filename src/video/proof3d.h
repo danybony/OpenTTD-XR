@@ -107,6 +107,11 @@ void SetTerrain3DTable(int tiles);
 /** Diagnostics: one ground texture per tile, without blending across tile edges. */
 void SetTerrain3DGroundFast(bool enabled);
 void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, float fov, float spin);
+/** A small part of the map seen as a model on a table, or back to the normal camera. */
+void ToggleTerrain3DTabletop(Viewport &vp);
+bool IsTerrain3DTabletop(const Viewport &vp);
+/** Apply a two finger gesture to a tabletop view: the table moves, turns and grows under the fingers. False for other views. */
+bool Terrain3DTouchGesture(Viewport &vp, float pan_x, float pan_y, float scale, float rotate);
 bool UpdateViewportCamera3D(Viewport &vp, uint32_t delta_ms);
 void SetViewportCamera3DLog(bool enabled);
 /** Test scripts: called with a ride-along view's vehicle, the event's name and how dark the view is. */
@@ -114,6 +119,9 @@ using RideEvent3DHook = void (*)(VehicleID vehicle, std::string_view event, floa
 void SetViewportCamera3DEventHook(RideEvent3DHook hook);
 #else
 inline bool UpdateViewportCamera3D(Viewport &, uint32_t) { return false; }
+inline bool Terrain3DTouchGesture(Viewport &, float, float, float, float) { return false; }
+inline void ToggleTerrain3DTabletop(Viewport &) {}
+inline bool IsTerrain3DTabletop(const Viewport &) { return false; }
 inline bool SetProof3DEnabled(bool) { return false; }
 inline bool IsProof3DEnabled() { return false; }
 inline bool IsProof3DSupported() { return false; }

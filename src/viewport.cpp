@@ -65,6 +65,7 @@
 #include "landscape.h"
 #include "viewport_func.h"
 #include "video/proof3d.h"
+#include "progress.h"
 #include "station_base.h"
 #include "station_func.h"
 #include "waypoint_base.h"
@@ -2176,6 +2177,63 @@ bool MarkAllViewportsDirty(int left, int top, int right, int bottom)
 	}
 
 	return dirty;
+}
+
+static float _two_finger_zoom_left = 0; ///< Zoom levels of the current two finger gesture that did not make up a whole level yet.
+
+/** Settle on the nearest zoom level when the fingers lift: between levels the 3D view is slightly blurred and picks less exactly. */
+void EndTwoFingerGesture()
+{
+	Window *w = GetMainWindow();
+	if (w != nullptr && w->viewport != nullptr && !HasModalProgress()) {
+		if (_two_finger_zoom_left >= 0.5f) DoZoomInOutWindow(ZOOM_IN, w);
+		if (_two_finger_zoom_left <= -0.5f) DoZoomInOutWindow(ZOOM_OUT, w);
+		if (IsProof3DEnabled()) SetTerrain3DMagnify(1);
+	}
+	_two_finger_zoom_left = 0;
+}
+
+/**
+ * Apply a step of a two finger gesture to the main view, which follows the fingers.
+ * @param pan_x Pixels the fingers moved to the right.
+ * @param pan_y Pixels the fingers moved down.
+ * @param scale How many times further apart the fingers are.
+ * @param rotate Degrees the fingers turned clockwise.
+ */
+void HandleTwoFingerGesture(float pan_x, float pan_y, float scale, float rotate)
+{
+	Window *w = GetMainWindow();
+	if (w == nullptr || w->viewport == nullptr || HasModalProgress()) return;
+	if (Terrain3DTouchGesture(*w->viewport, pan_x, pan_y, scale, rotate)) return;
+
+	if (w->viewport->follow_vehicle != VehicleID::Invalid()) {
+		const Vehicle *veh = Vehicle::Get(w->viewport->follow_vehicle)->GetMovingFront();
+		ScrollMainWindowTo(veh->x_pos, veh->y_pos, veh->z_pos, true);
+	}
+
+	/* The view moves by whole pixels and zooms by whole levels, so keep what is left over for the next step. */
+	static float pan_left_x = 0, pan_left_y = 0;
+	float &zoom_left = _two_finger_zoom_left;
+	pan_left_x += pan_x;
+	pan_left_y += pan_y;
+	const int dx = static_cast<int>(pan_left_x), dy = static_cast<int>(pan_left_y);
+	pan_left_x -= dx;
+	pan_left_y -= dy;
+	if (dx != 0 || dy != 0) w->OnScroll({-dx, -dy});
+
+	zoom_left += std::log2(scale);
+	while (zoom_left >= 1) {
+		zoom_left = DoZoomInOutWindow(ZOOM_IN, w) ? zoom_left - 1 : 0;
+	}
+	while (zoom_left <= -1) {
+		zoom_left = DoZoomInOutWindow(ZOOM_OUT, w) ? zoom_left + 1 : 0;
+	}
+	if (IsProof3DEnabled()) {
+		/* Between zoom levels the 3D view scales smoothly. */
+		SetTerrain3DMagnify(std::exp2(zoom_left));
+		/* The camera turns the opposite way to what it shows, and the ground should follow the fingers. */
+		if (rotate != 0) OrbitTerrain3DCamera(-rotate, 0, false);
+	}
 }
 
 void ConstrainAllViewportsZoom()
