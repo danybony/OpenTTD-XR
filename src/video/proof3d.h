@@ -34,6 +34,8 @@ void SetProof3DGPUVerification(bool enabled);
 void SetProof3DLayerVerification(bool enabled);
 /** Phase 8 ground textures; disabling forces the flat-colour fallback (diagnostics and A/B benchmarks). */
 void SetTerrain3DGroundTextures(bool enabled);
+/** The dark lines between tiles of the classic view. */
+void SetTerrain3DTileGrid(bool enabled);
 /** False before the first 3D frame, when forced flat, or when the driver could not create the textures. */
 bool AreTerrain3DGroundTexturesActive();
 /** Phase 9.5c shadows: 0 off (original lighting), 1 contact shadows, 2 contact and sun shadows. */
@@ -126,6 +128,7 @@ inline bool SetProof3DEnabled(bool) { return false; }
 inline bool IsProof3DEnabled() { return false; }
 inline bool IsProof3DSupported() { return false; }
 inline void SetTerrain3DGroundTextures(bool) {}
+inline void SetTerrain3DTileGrid(bool) {}
 inline void SetTerrain3DShadows(int) {}
 inline void SetTerrain3DAutoVisibility(bool) {}
 inline int GetTerrain3DShadows() { return 0; }

@@ -266,6 +266,7 @@ enum Camera3DMenu {
 	C3M_AUTO_VISIBILITY,
 	C3M_RETRO,
 	C3M_TABLETOP,
+	C3M_TILE_GRID,
 };
 
 static void ShowCamera3DMenu(Window *w)
@@ -277,6 +278,7 @@ static void ShowCamera3DMenu(Window *w)
 	list.push_back(MakeDropDownListCheckedItem(enabled, STR_3D_ENABLE, C3M_ENABLE, !supported));
 	list.push_back(MakeDropDownListDividerItem());
 	list.push_back(MakeDropDownListCheckedItem(_settings_client.gui.renderer_3d_ground_textures, STR_3D_GROUND, C3M_GROUND));
+	list.push_back(MakeDropDownListCheckedItem(_settings_client.gui.renderer_3d_tile_grid, STR_3D_TILE_GRID, C3M_TILE_GRID));
 	list.push_back(MakeDropDownListCheckedItem(_settings_client.gui.renderer_3d_camera_hints, STR_3D_HINTS, C3M_HINTS));
 	list.push_back(MakeDropDownListCheckedItem(_settings_client.gui.renderer_3d_auto_visibility, STR_3D_AUTO_VISIBILITY, C3M_AUTO_VISIBILITY));
 	list.push_back(MakeDropDownListDividerItem());
@@ -316,6 +318,7 @@ static void SelectCamera3DMenu(int index)
 			break;
 		}
 		case C3M_GROUND: toggle("gui.renderer_3d_ground_textures", _settings_client.gui.renderer_3d_ground_textures); break;
+		case C3M_TILE_GRID: toggle("gui.renderer_3d_tile_grid", _settings_client.gui.renderer_3d_tile_grid); break;
 		case C3M_HINTS: toggle("gui.renderer_3d_camera_hints", _settings_client.gui.renderer_3d_camera_hints); break;
 		case C3M_AUTO_VISIBILITY: toggle("gui.renderer_3d_auto_visibility", _settings_client.gui.renderer_3d_auto_visibility); break;
 		case C3M_CLASSIC: ReturnTerrain3DCamera(); break;

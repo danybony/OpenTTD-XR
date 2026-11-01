@@ -6105,6 +6105,7 @@ STR_3D_LEFT                                                    :Rotate left
 STR_3D_RIGHT                                                   :Rotate right
 STR_3D_TILT_UP                                                 :Tilt up
 STR_3D_TILT_DOWN                                               :Tilt down
+STR_3D_TILE_GRID                                               :Lines between tiles
 STR_3D_TABLETOP                                                :Tabletop view
 STR_3D_HELP_TITLE                                              :3D camera help
 STR_3D_ORBIT_HINT                                              :Rotated map - build at this angle; Home switches to the classic angle

@@ -393,6 +393,7 @@ struct AfterNewGRFScan : NewGRFScanCallback {
 		/* Apply client presentation after full config loading and driver startup.
 		 * An unsupported backend keeps the preference for the next supported launch. */
 		SetTerrain3DGroundTextures(_settings_client.gui.renderer_3d_ground_textures);
+		SetTerrain3DTileGrid(_settings_client.gui.renderer_3d_tile_grid);
 		SetTerrain3DShadows(_settings_client.gui.renderer_3d_shadows);
 		SetTerrain3DAutoVisibility(_settings_client.gui.renderer_3d_auto_visibility);
 		SetProof3DEnabled(_settings_client.gui.renderer_3d);

@@ -61,6 +61,11 @@ across tile edges.
 When testing in the emulator, start it with `-gpu swangle_indirect`. With
 `swiftshader_indirect` the 3D view shows only the clear colour and labels.
 
+## Tile lines
+
+The 3D menu can draw the dark lines between tiles that the classic view has, which
+also make railway routes easier to follow. They are on by default.
+
 ## Touch
 
 One finger acts as the mouse. Two fingers pan, pinch to zoom and turn the main

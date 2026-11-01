@@ -94,6 +94,11 @@ static void Renderer3DChanged(int32_t new_value)
 	SetProof3DEnabled(new_value != 0);
 }
 
+static void Renderer3DTileGridChanged(int32_t new_value)
+{
+	SetTerrain3DTileGrid(new_value != 0);
+}
+
 static void Renderer3DGroundChanged(int32_t new_value)
 {
 	SetTerrain3DGroundTextures(new_value != 0);

@@ -217,6 +217,7 @@ enum class ViewportAutoscrolling : uint8_t {
 struct GUISettings {
 	bool renderer_3d;                        ///< Saved client preference; unsupported drivers retain classic rendering.
 	bool renderer_3d_ground_textures;        ///< Textured terrain rather than flat colours.
+	bool renderer_3d_tile_grid;              ///< Dark lines between tiles, as in the classic view.
 	bool renderer_3d_camera_hints;           ///< Show the orbit and vehicle camera hints.
 	uint8_t renderer_3d_shadows;             ///< 3D shadows: 0 off, 1 contact shadows, 2 contact and sun shadows.
 	bool renderer_3d_auto_visibility;        ///< Fade obstructions and outline the current 3D focus.
