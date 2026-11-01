@@ -92,6 +92,13 @@ void SetXRPanels(bool active)
 {
 	if (_active == active) return;
 	_active = active;
+	/* Leaving, windows stay where their panels were on the screen, as far as the game's own limits allow. */
+	if (!active) {
+		for (const auto &panel : _panels) {
+			panel.window->left = static_cast<int>(std::round(panel.screen_x - panel.window->width / 2.0f));
+			panel.window->top = static_cast<int>(std::round(panel.screen_y - panel.window->height / 2.0f));
+		}
+	}
 	_panels.clear();
 	_draws.clear();
 	_dragging = nullptr;
