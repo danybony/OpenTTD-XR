@@ -1129,7 +1129,8 @@ bool UpdateViewportCamera3D(Viewport &vp, uint32_t delta_ms)
 		vp.camera_eye[0] = _terrain_bench.target_x - forward[0] * _terrain_bench.radius;
 		vp.camera_eye[1] = _terrain_bench.target_y - forward[1] * _terrain_bench.radius;
 		vp.camera_eye[3] = heading;
-		return true;
+		/* The camera is part of the view's image key: the 3D layer refreshes by itself and the 2D buffer stays as it is. */
+		return false;
 	}
 	bool cab = vp.camera_3d == ViewportCamera3D::Cab;
 	if ((!cab && vp.camera_3d != ViewportCamera3D::Chase) || !Vehicle::IsValidID(vp.camera_vehicle)) {

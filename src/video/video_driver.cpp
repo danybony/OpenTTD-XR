@@ -125,6 +125,7 @@ void VideoDriver::Tick()
 
 		/* Locking video buffer can block (especially with vsync enabled), do it before taking game state lock. */
 		this->LockVideoBuffer();
+		auto locked = std::chrono::steady_clock::now();
 
 		{
 			/* Tell the game-thread to stop so we can have a go. */
@@ -163,8 +164,11 @@ void VideoDriver::Tick()
 		auto paint_start = std::chrono::steady_clock::now();
 		this->Paint();
 
+		auto painted = std::chrono::steady_clock::now();
 		this->UnlockVideoBuffer();
 		NoteProof3DPresent(now, paint_start);
+		auto micros = [](auto from, auto to) { return std::chrono::duration_cast<std::chrono::microseconds>(to - from).count(); };
+		Debug(Facility::Driver, Severity::Debug2, "PHASE7 tickparts lock_us={} update_us={} paint_us={} unlock_us={}", micros(now, locked), micros(locked, paint_start), micros(paint_start, painted), micros(painted, std::chrono::steady_clock::now()));
 
 		/* Wait till the first successful drawing tick before marking the driver as operational. */
 		static bool first_draw_tick = true;

@@ -15,6 +15,8 @@
  *  - BGRA uploads become RGBA uploads of the same bytes, with red and blue swizzled when
  *    sampling. Textures that are rendered to must therefore be created as GL_RGBA.
  *  - GLSL 1.50 sources are rewritten to GLSL ES 3.00.
+ *  - Pixel unpack buffers live in client memory. Mapping a real one for reading and writing
+ *    copies all of it each frame on mobile GPUs, however little of the screen changed.
  *  - Diagnostics without an ES equivalent (wireframe, GPU timers) do nothing.
  */
 
@@ -29,7 +31,10 @@
 
 #include "opengl_es.h"
 
+#include <algorithm>
 #include <regex>
+#include <unordered_map>
+#include <vector>
 
 #include "../safeguards.h"
 
@@ -46,6 +51,61 @@ static GetOGLProcAddressProc _real_get_proc = nullptr;
 
 /** Get a function pointer of the real context on first use. */
 #define REAL(type, name) static const auto real = reinterpret_cast<type>(_real_get_proc(name))
+
+static std::unordered_map<GLuint, std::vector<uint8_t>> _unpack_buffers; ///< Contents of the pixel unpack buffers, by name.
+static GLuint _unpack_binding = 0; ///< The pixel unpack buffer the backend has bound.
+
+/** The pointer a pixel transfer means: with an unpack buffer bound, \p pixels is an offset into it. */
+static const void *UnpackPointer(const void *pixels)
+{
+	if (_unpack_binding == 0) return pixels;
+	return _unpack_buffers[_unpack_binding].data() + reinterpret_cast<uintptr_t>(pixels);
+}
+
+static void APIENTRY ESBindBuffer(GLenum target, GLuint buffer)
+{
+	REAL(PFNGLBINDBUFFERPROC, "glBindBuffer");
+	if (target == GL_PIXEL_UNPACK_BUFFER) {
+		_unpack_binding = buffer;
+	} else {
+		real(target, buffer);
+	}
+}
+
+static void APIENTRY ESBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum usage)
+{
+	REAL(PFNGLBUFFERDATAPROC, "glBufferData");
+	if (target != GL_PIXEL_UNPACK_BUFFER) {
+		real(target, size, data, usage);
+		return;
+	}
+	auto &buffer = _unpack_buffers[_unpack_binding];
+	buffer.resize(size);
+	if (data != nullptr) std::copy_n(static_cast<const uint8_t *>(data), size, buffer.data());
+}
+
+static void APIENTRY ESBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void *data)
+{
+	REAL(PFNGLBUFFERSUBDATAPROC, "glBufferSubData");
+	if (target != GL_PIXEL_UNPACK_BUFFER) {
+		real(target, offset, size, data);
+		return;
+	}
+	std::copy_n(static_cast<const uint8_t *>(data), size, _unpack_buffers[_unpack_binding].data() + offset);
+}
+
+static void APIENTRY ESDeleteBuffers(GLsizei count, const GLuint *buffers)
+{
+	REAL(PFNGLDELETEBUFFERSPROC, "glDeleteBuffers");
+	for (GLsizei i = 0; i < count; i++) _unpack_buffers.erase(buffers[i]);
+	real(count, buffers);
+}
+
+static GLboolean APIENTRY ESUnmapBuffer(GLenum target)
+{
+	REAL(PFNGLUNMAPBUFFERPROC, "glUnmapBuffer");
+	return target == GL_PIXEL_UNPACK_BUFFER ? GL_TRUE : real(target);
+}
 
 static GLenum ToESTarget(GLenum target)
 {
@@ -76,6 +136,7 @@ static void APIENTRY ESTexImage2D(GLenum target, GLint level, GLint internal_for
 {
 	REAL(PFNGLTEXIMAGE2DPROC, "glTexImage2D");
 	target = ToESTarget(target);
+	pixels = UnpackPointer(pixels);
 	if (format == GL_BGRA) {
 		real(target, level, GL_RGBA8, width, height, border, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 		SwizzleBoundTexture(target);
@@ -91,7 +152,7 @@ static void APIENTRY ESTexSubImage2D(GLenum target, GLint level, GLint x, GLint 
 		format = GL_RGBA;
 		type = GL_UNSIGNED_BYTE;
 	}
-	real(ToESTarget(target), level, x, y, width, height, format, type, pixels);
+	real(ToESTarget(target), level, x, y, width, height, format, type, UnpackPointer(pixels));
 }
 
 static void APIENTRY ESTexImage1D(GLenum target, GLint level, GLint internal_format, GLsizei width, GLint border, GLenum format, GLenum type, const void *pixels)
@@ -119,6 +180,8 @@ static void *APIENTRY ESMapBuffer(GLenum target, GLenum access)
 {
 	REAL(PFNGLMAPBUFFERRANGEPROC, "glMapBufferRange");
 	static const auto get_size = reinterpret_cast<PFNGLGETBUFFERPARAMETERIVPROC>(_real_get_proc("glGetBufferParameteriv"));
+	if (target == GL_PIXEL_UNPACK_BUFFER) return _unpack_buffers[_unpack_binding].data();
+
 	GLint size = 0;
 	get_size(target, GL_BUFFER_SIZE, &size);
 	GLbitfield bits = 0;
@@ -225,6 +288,11 @@ static OGLProc GetESProcAddress(const char *proc)
 		ES("glTexSubImage2D", ESTexSubImage2D),
 		ES("glTexImage3D", ESTexImage3D),
 		ES("glMapBuffer", ESMapBuffer),
+		ES("glUnmapBuffer", ESUnmapBuffer),
+		ES("glBindBuffer", ESBindBuffer),
+		ES("glBufferData", ESBufferData),
+		ES("glBufferSubData", ESBufferSubData),
+		ES("glDeleteBuffers", ESDeleteBuffers),
 		ES("glReadPixels", ESReadPixels),
 		ES("glGetIntegerv", ESGetIntegerv),
 		ES("glDrawBuffer", ESDrawBuffer),

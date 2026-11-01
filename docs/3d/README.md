@@ -47,9 +47,9 @@ of each version. The script lists the variables it needs. It requires a device
 or emulator with OpenGL ES 3.0; the game uses the ES layer above.
 
 Read logs with `adb logcat -s OpenTTD`. In the console, `debug_level driver=6`
-prints the per-frame renderer counters and splits each frame into submitting,
-waiting for the GPU and presenting. The GPU wait changes the frame rate, so take
-frame rates without it.
+prints the per-frame renderer counters and how long each part of the tick took.
+`debug_level driver=7` also splits painting into submitting, waiting for the GPU
+and presenting. That wait changes the frame rate, so take frame rates without it.
 
 `renderer_3d bench <height> <pitch> <field of view> <degrees per frame>` makes the
 main view orbit its centre in perspective, so every frame renders in full as with
