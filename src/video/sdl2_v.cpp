@@ -472,7 +472,8 @@ static void MoveTouchCursor(TouchPoint pos)
 
 static void HandleFingerEvent(const SDL_TouchFingerEvent &finger)
 {
-	const TouchPoint pos{finger.x * _screen.width, finger.y * _screen.height};
+	/* Fingers can only be on the screen, whatever the video buffer has below it. */
+	const TouchPoint pos{finger.x * _screen.width, finger.y * (_screen.height - GetXRAtlasExtraHeight())};
 	auto tracked = std::find_if(_touch.fingers.begin(), _touch.fingers.begin() + _touch.count, [&](const auto &f) { return f.id == finger.fingerId; });
 	const bool known = tracked != _touch.fingers.begin() + _touch.count;
 
@@ -541,13 +542,14 @@ void PushTwoFingerTestGesture(float pan_x, float pan_y, float scale, float rotat
 		ev.tfinger.type = type;
 		ev.tfinger.fingerId = id;
 		ev.tfinger.x = x / _screen.width;
-		ev.tfinger.y = y / _screen.height;
+		ev.tfinger.y = y / (_screen.height - GetXRAtlasExtraHeight());
 		SDL_PushEvent(&ev);
 	};
 	auto at = [&](int step, float sign) {
 		const float t = static_cast<float>(step) / STEPS;
-		const float angle = rotate * t * 3.14159265359f / 180, radius = _screen.height * 0.2f * std::pow(scale, t) * sign;
-		return TouchPoint{_screen.width * 0.5f + pan_x * t + radius * std::cos(angle), _screen.height * 0.5f + pan_y * t + radius * std::sin(angle)};
+		const float height = static_cast<float>(_screen.height - GetXRAtlasExtraHeight());
+		const float angle = rotate * t * 3.14159265359f / 180, radius = height * 0.2f * std::pow(scale, t) * sign;
+		return TouchPoint{_screen.width * 0.5f + pan_x * t + radius * std::cos(angle), height * 0.5f + pan_y * t + radius * std::sin(angle)};
 	};
 	send(SDL_FINGERDOWN, 1, at(0, 1).x, at(0, 1).y);
 	send(SDL_FINGERDOWN, 2, at(0, -1).x, at(0, -1).y);
