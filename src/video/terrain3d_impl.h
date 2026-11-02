@@ -1101,13 +1101,15 @@ static void PlaceTerrain3DOrbit(Viewport &vp, float heading)
 	vp.camera_eye = {_terrain_bench.target_x - forward[0] * _terrain_bench.radius, _terrain_bench.target_y - forward[1] * _terrain_bench.radius,
 		GetSlopePixelZOutsideMap(static_cast<int>(_terrain_bench.target_x), static_cast<int>(_terrain_bench.target_y)) + _terrain_bench.height,
 		heading, vp.camera_eye[4], vp.camera_eye[5]};
-	_terrain_table_x = _terrain_bench.target_x;
-	_terrain_table_y = _terrain_bench.target_y;
+	_terrain_table_x = Terrain3D::SnapTableCentre(_terrain_bench.target_x, _terrain_table_half, TILE_SIZE);
+	_terrain_table_y = Terrain3D::SnapTableCentre(_terrain_bench.target_y, _terrain_table_half, TILE_SIZE);
 }
 
 void SetTerrain3DTable(int tiles)
 {
 	_terrain_table_half = static_cast<float>(tiles * TILE_SIZE) / 2;
+	_terrain_table_x = Terrain3D::SnapTableCentre(_terrain_bench.target_x, _terrain_table_half, TILE_SIZE);
+	_terrain_table_y = Terrain3D::SnapTableCentre(_terrain_bench.target_y, _terrain_table_half, TILE_SIZE);
 	/* Nothing fades out on a table, and everything around it stays undrawn. */
 	if (tiles > 0) _terrain_draw_distance = 1024 * TILE_SIZE;
 	MarkWholeScreenDirty();
@@ -1293,6 +1295,11 @@ Point PickTerrain3D(const Viewport &vp, int x, int y, bool clamp_to_map)
 		if (!Terrain3D::HitBox(camera, chunk.low, chunk.high, float(x - vp.left), float(y - vp.top))) continue;
 		for (const auto &face : chunk.faces) {
 			if (!face.ground) continue;
+			if (tabletop) {
+				const float tx = static_cast<float>(TileX(face.tile) * TILE_SIZE), ty = static_cast<float>(TileY(face.tile) * TILE_SIZE);
+				if (tx < _terrain_table_x - _terrain_table_half || tx >= _terrain_table_x + _terrain_table_half ||
+						ty < _terrain_table_y - _terrain_table_half || ty >= _terrain_table_y + _terrain_table_half) continue;
+			}
 			std::array<Vec,3> p{camera.Project(face.p[0]),camera.Project(face.p[1]),camera.Project(face.p[2])};
 			std::array<float,3> weights;
 			if (!Terrain3D::Hit(p,float(x-vp.left),float(y-vp.top),weights)) continue;

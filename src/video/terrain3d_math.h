@@ -7,6 +7,12 @@
 #include <cmath>
 
 namespace Terrain3D {
+/** Where to put the middle of a table following a point, so that its edges lie between tiles and it moves one tile at a time. */
+inline float SnapTableCentre(float centre, float half, float tile_size)
+{
+	return std::round((centre - half) / tile_size) * tile_size + half;
+}
+
 /** Inclusive chunk rectangle affected by a tile and its shared corners. */
 inline std::array<int, 4> DirtyChunks(int x, int y, int width, int height, int chunk_size)
 {

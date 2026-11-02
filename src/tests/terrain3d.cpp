@@ -849,3 +849,16 @@ TEST_CASE("3D dirty cells mark, test and merge the screen cells a partial render
 	CHECK(cells.Fraction() == 1.0f);
 	CHECK(cells.Rects() == std::vector<std::array<int, 4>>{{0, 0, 100, 32}, {0, 32, 100, 32}, {0, 64, 100, 6}});
 }
+
+TEST_CASE("Terrain3D table moves one tile at a time")
+{
+	using Terrain3D::SnapTableCentre;
+	/* 32 tiles: the middle of the table is between tiles. */
+	CHECK(SnapTableCentre(1600, 256, 16) == 1600);
+	CHECK(SnapTableCentre(1607, 256, 16) == 1600);
+	CHECK(SnapTableCentre(1609, 256, 16) == 1616);
+	CHECK(SnapTableCentre(1624, 256, 16) == 1632);
+	/* 33 tiles: the edges are still between tiles, so the middle is on a tile's middle. */
+	CHECK(SnapTableCentre(1600, 264, 16) == 1608);
+	CHECK(SnapTableCentre(1595, 264, 16) == 1592);
+}

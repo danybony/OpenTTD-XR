@@ -357,7 +357,7 @@ static std::vector<ProofInstance> _proof_instance_upload;
 struct ProofLocations {
 	GLint cameraA, cameraB, cameraC, selection, selectedTile, visibility, viewProjection, viewProjections, eye, fog;
 	GLint modelA, modelB, companyA, companyB, groundTextures, groundMap, groundInfo, groundCrisp, groundFast, groundGrid;
-	GLint shadowMap, shadowMatrix, shadowInfo, shadowFade, autoFocus;
+	GLint shadowMap, shadowMatrix, shadowInfo, shadowFade, autoFocus, table;
 	std::array<GLint, 6> vertex;
 	std::array<GLint, 4> instance;
 };
@@ -424,6 +424,16 @@ static int _stereo_pass = -1; ///< The view being rendered: -1 the only one, 0 a
 static bool _stereo_compile = false; ///< Compiling the multiview programs rather than the normal ones.
 static std::array<float, 32> _stereo_matrices{}; ///< View projections of both eyes.
 
+/** Tell a shader which square of the world a table view keeps; everything else has an empty square. */
+static void ProofTableUniform(GLint location, const Terrain3D::Camera &camera)
+{
+	if (camera.table_half > 0) {
+		ProofUniform(location, camera.table_x - camera.table_half, camera.table_y - camera.table_half, camera.table_x + camera.table_half, camera.table_y + camera.table_half);
+	} else {
+		ProofUniform(location, 0, 0, 0, 0);
+	}
+}
+
 /** Perspective projection and fog; an orthographic camera leaves eye.w at 0 and the shaders keep their own projection. */
 static void ProofPerspectiveUniforms(const ProofLocations &locations, const Terrain3D::Camera &camera)
 {
@@ -434,6 +444,7 @@ static void ProofPerspectiveUniforms(const ProofLocations &locations, const Terr
 	}
 	ProofUniform(locations.eye, camera.eye.x, camera.eye.y, camera.eye.z, camera.distance);
 	ProofUniform(locations.fog, PROOF_FOG[0], PROOF_FOG[1], PROOF_FOG[2], camera.distance * 0.6f);
+	ProofTableUniform(locations.table, camera);
 }
 
 /* Shadows (phase 9.5c): a client preference; 0 keeps the original lighting and skips every shadow pass. */
@@ -449,7 +460,7 @@ static GLuint _proof_occlusion_fbo = 0, _proof_occlusion = 0, _proof_occlusion_p
 static GLint _proof_occlusion_map = -1, _proof_occlusion_strength = -1;
 static int _proof_contact_width = 0, _proof_contact_height = 0;
 static GLint _proof_contact_view, _proof_contact_inverse, _proof_contact_viewer, _proof_contact_screen, _proof_contact_bounds,
-	_proof_contact_heights, _proof_contact_visibility, _proof_contact_eye, _proof_contact_fog, _proof_contact_depth_map;
+	_proof_contact_heights, _proof_contact_visibility, _proof_contact_eye, _proof_contact_fog, _proof_contact_depth_map, _proof_contact_table;
 static std::array<GLint, 4> _proof_contact_instance{};
 /** Sun shadow sampling for the current render: world to shadow-map texture coordinates, and (sample, strength, normal offset, depth pass). */
 static std::array<float, 16> _proof_shadow_matrix{};
@@ -530,9 +541,11 @@ static bool InitProofProgram()
 in vec3 position; in vec3 colour; in float transparent; in vec3 metadata; in vec4 world; in float layer;
 uniform vec4 cameraA, cameraB, cameraC, selection, selectedTile, visibility;
 uniform vec4 modelA, modelB, companyA, companyB;
-uniform mat4 viewProjection; uniform vec4 eye, fog;
+uniform mat4 viewProjection; uniform vec4 eye, fog, table;
 out vec3 tint; out float stipple; flat out int hidden; out vec2 worldPos; flat out vec2 faceTile; flat out float groundLayer; out float haze;
 out vec3 shadowPlace; out float shadowReceive; flat out float obstruction;
+// A table keeps whole tiles and whole objects: what belongs off it collapses to a point outside the clip volume.
+bool offTable(vec2 at) { return table.z>table.x && (any(lessThan(at,table.xy)) || any(greaterThanEqual(at,table.zw))); }
 // Perspective views (eye.w is the draw distance) fade into the fog colour before the draw distance cuts anything off.
 void perspective(vec3 place) {
  gl_Position=viewProjection*vec4(place,1);
@@ -578,7 +591,10 @@ void main() {
   vec2 delta=place.xy-cameraA.xy;
   float x=delta.x*cameraB.x-delta.y*cameraB.y;
   float y=delta.x*cameraB.y+delta.y*cameraB.x;
-  if(eye.w>0.0) perspective(place);
+  if(eye.w>0.0) {
+   perspective(place);
+   if(offTable(cameraC.w>2.5?vec2(companyA.w,companyB.w):cameraC.w>1.5?modelA.xy:metadata.xy)) gl_Position=vec4(2,2,2,1);
+  }
   else gl_Position=vec4(4.0*(y-x)*cameraA.z/cameraA.w,
     -2.0*((x+y)*cameraB.z-(place.z-cameraC.y))*cameraA.z/cameraB.w,
     -(x+y+2.0*cameraB.z*place.z)/cameraC.x,1);
@@ -675,6 +691,7 @@ void main(){
 	_proof_locations.selectedTile = _glGetUniformLocation(_proof_program, "selectedTile");
 	_proof_locations.visibility = _glGetUniformLocation(_proof_program, "visibility");
 	_proof_locations.autoFocus = _glGetUniformLocation(_proof_program, "autoFocus");
+	_proof_locations.table = _glGetUniformLocation(_proof_program, "table");
 	_proof_locations.viewProjection = _glGetUniformLocation(_proof_program, "viewProjection");
 	_proof_locations.viewProjections = _glGetUniformLocation(_proof_program, "viewProjections");
 	_proof_locations.eye = _glGetUniformLocation(_proof_program, "eye");
@@ -960,9 +977,10 @@ static bool InitProofInstanceProgram()
 in vec3 position, colour, metadata;
 in vec4 instanceModelA, instanceModelB, instanceCompanyA, instanceCompanyB;
 uniform vec4 cameraA, cameraB, cameraC, selection, selectedTile, visibility;
-uniform mat4 viewProjection; uniform vec4 eye, fog;
+uniform mat4 viewProjection; uniform vec4 eye, fog, table;
 out vec3 tint; out float stipple; flat out int hidden; out float haze;
 out vec3 shadowPlace; out float shadowReceive; flat out float obstruction;
+bool offTable(vec2 at) { return table.z>table.x && (any(lessThan(at,table.xy)) || any(greaterThanEqual(at,table.zw))); }
 void main() {
  hidden=0; haze=0.0; obstruction=0.0;
  vec4 a=instanceModelA, b=instanceModelB;
@@ -992,6 +1010,7 @@ void main() {
  if(eye.w>0.0) {
   gl_Position=viewProjection*vec4(place,1);
   haze=smoothstep(fog.w,eye.w*0.98,distance(place,eye.xyz));
+  if(offTable(cameraC.w>2.5?vec2(instanceCompanyA.w,instanceCompanyB.w):a.xy)) gl_Position=vec4(2,2,2,1);
   return;
  }
  vec2 delta=place.xy-cameraA.xy;
@@ -1032,6 +1051,7 @@ void main() {
 	_proof_instance_locations.selectedTile = _glGetUniformLocation(_proof_instance_program, "selectedTile");
 	_proof_instance_locations.visibility = _glGetUniformLocation(_proof_instance_program, "visibility");
 	_proof_instance_locations.autoFocus = _glGetUniformLocation(_proof_instance_program, "autoFocus");
+	_proof_instance_locations.table = _glGetUniformLocation(_proof_instance_program, "table");
 	_proof_instance_locations.cameraA = _glGetUniformLocation(_proof_instance_program, "cameraA");
 	_proof_instance_locations.cameraB = _glGetUniformLocation(_proof_instance_program, "cameraB");
 	_proof_instance_locations.cameraC = _glGetUniformLocation(_proof_instance_program, "cameraC");
@@ -1558,8 +1578,9 @@ static bool InitProofContact()
 	 * Only the faces turned away from the viewer are kept, so each pixel is shaded once even from inside a box. */
 	const char *vertex = R"GLSL(#version 150
 in vec4 instanceModelA, instanceModelB, instanceCompanyA, instanceCompanyB;
-uniform mat4 viewProjection; uniform vec4 viewer, bounds, heights, visibility;
+uniform mat4 viewProjection; uniform vec4 viewer, bounds, heights, visibility, table;
 flat out vec4 frameA, frameB, frameC;
+bool offTable(vec2 at) { return table.z>table.x && (any(lessThan(at,table.xy)) || any(greaterThanEqual(at,table.zw))); }
 const int corners[36]=int[36](0,2,6,0,6,4, 1,5,7,1,7,3, 0,4,5,0,5,1, 2,3,7,2,7,6, 0,1,3,0,3,2, 4,6,7,4,7,5);
 const vec3 normals[6]=vec3[6](vec3(-1,0,0),vec3(1,0,0),vec3(0,-1,0),vec3(0,1,0),vec3(0,0,-1),vec3(0,0,1));
 void main() {
@@ -1568,7 +1589,7 @@ void main() {
  bool skip=heights.z>2.5?(int(visibility.x)&(1<<int(b.w)))!=0:b.w>0.5;
  float low=heights.x*b.z, tall=(heights.y-heights.x)*b.z;
  vec4 rect=vec4(bounds.x*a.w,bounds.y*a.w,bounds.z,bounds.w);
- if(skip || tall<1.5) return;
+ if(skip || tall<1.5 || offTable(a.xy)) return;
  float reach=clamp(0.35*tall,1.5,6.0);
  float margin=clamp(0.25*min(rect.y-rect.x,rect.w-rect.z)+0.75,1.0,4.0);
  int c=corners[gl_VertexID];
@@ -1622,6 +1643,7 @@ void main() { pixel=vec4(vec3(1.0-strength*texelFetch(occlusion,ivec2(gl_FragCoo
 	_proof_contact_heights = _glGetUniformLocation(_proof_contact_program, "heights");
 	_proof_contact_visibility = _glGetUniformLocation(_proof_contact_program, "visibility");
 	_proof_contact_eye = _glGetUniformLocation(_proof_contact_program, "eye");
+	_proof_contact_table = _glGetUniformLocation(_proof_contact_program, "table");
 	_proof_contact_fog = _glGetUniformLocation(_proof_contact_program, "fog");
 	_proof_contact_depth_map = _glGetUniformLocation(_proof_contact_program, "sceneDepth");
 	_proof_occlusion_map = _glGetUniformLocation(_proof_occlusion_program, "occlusion");
@@ -1707,6 +1729,7 @@ static void DrawProofContact(const Terrain3D::Camera &camera, float extent, int 
 	ProofUniform(_proof_contact_screen, width, height, 0, 0);
 	ProofUniform(_proof_contact_visibility, _game_mode == GameMode::Menu ? 0 : _transparency_opt.base(), _game_mode == GameMode::Menu ? 0 : (_transparency_opt & _invisibility_opt).base(), _transparency_lock.base(), 0);
 	ProofUniform(_proof_contact_eye, camera.eye.x, camera.eye.y, camera.eye.z, camera.distance);
+	ProofTableUniform(_proof_contact_table, camera);
 	ProofUniform(_proof_contact_fog, PROOF_FOG[0], PROOF_FOG[1], PROOF_FOG[2], camera.distance * 0.6f);
 	_glUniform1i(_proof_contact_depth_map, 6);
 	auto submit = [&](GLuint buffer, const std::vector<ProofInstanceBatch> &batches, size_t count, float mode) {
