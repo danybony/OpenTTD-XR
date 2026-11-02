@@ -2730,6 +2730,8 @@ static void VerifyProof3DLayer()
 /** Draw the part of the screen that is the main view, then the windows as panels over it. */
 void DrawProof3DPanels(GLuint video_texture, GLuint vao)
 {
+	/* Panels can be turned on before the first 3D view has been drawn. */
+	if (!LoadProofGL()) return;
 	static GLuint program = 0;
 	static GLint corners = -1, rect = -1, texture = -1, solid = -1;
 	if (program == 0) {
