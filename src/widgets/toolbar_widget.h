@@ -61,6 +61,12 @@ enum Retro3DWidgets : WidgetID {
 	WID_R3_NOTE,
 };
 
+/** Widgets of the tabletop size window. */
+enum Table3DWidgets : WidgetID {
+	WID_T3_SIZE, ///< Current size.
+	WID_T3_SLIDER, ///< Slider to change the size.
+};
+
 /** Widgets of the #ScenarioEditorToolbarWindow class. */
 enum ToolbarEditorWidgets : WidgetID {
 	WID_TE_PAUSE,         ///< Pause the game.

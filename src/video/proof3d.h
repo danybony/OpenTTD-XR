@@ -110,6 +110,8 @@ void SetProof3DStereo(int mode);
 void ForgetProof3DImages();
 /** Diagnostics: draw only a square of this many tiles around the bench target, on black; 0 for the whole world. */
 void SetTerrain3DTable(int tiles);
+/** Change the size of the table of a tabletop view, keeping it all in view. Other views pick the size up when they become one. */
+void ResizeTerrain3DTable(Viewport &vp, int tiles);
 /** Diagnostics: one ground texture per tile, without blending across tile edges. */
 void SetTerrain3DGroundFast(bool enabled);
 void StartTerrain3DBench(Viewport &vp, int x, int y, float height, float pitch, float fov, float spin);
@@ -131,6 +133,7 @@ void SetViewportCamera3DEventHook(RideEvent3DHook hook);
 inline bool UpdateViewportCamera3D(Viewport &, uint32_t) { return false; }
 inline bool Terrain3DTouchGesture(Viewport &, float, float, float, float) { return false; }
 inline void ToggleTerrain3DTabletop(Viewport &) {}
+inline void ResizeTerrain3DTable(Viewport &, int) {}
 inline bool IsTerrain3DTabletop(const Viewport &) { return false; }
 inline bool SetProof3DEnabled(bool) { return false; }
 inline bool IsProof3DEnabled() { return false; }

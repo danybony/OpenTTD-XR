@@ -743,6 +743,7 @@ enum class WindowClass : uint16_t {
 	 */
 	Help,
 	Retro3D, ///< Local retro pixel display preferences; window number 0.
+	Table3D, ///< Size of the table of the tabletop view; window number 0.
 
 	Invalid = 0xFFFF, ///< Invalid window.
 };

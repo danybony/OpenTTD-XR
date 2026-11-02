@@ -1115,6 +1115,16 @@ void SetTerrain3DTable(int tiles)
 	MarkWholeScreenDirty();
 }
 
+void ResizeTerrain3DTable(Viewport &vp, int tiles)
+{
+	if (!IsTerrain3DTabletop(vp)) return;
+	const float scale = tiles * TILE_SIZE / (2 * _terrain_table_half);
+	_terrain_bench.height *= scale;
+	_terrain_bench.radius *= scale;
+	SetTerrain3DTable(tiles);
+	PlaceTerrain3DOrbit(vp, vp.camera_eye[3]);
+}
+
 void SetTerrain3DDrawDistance(int tiles)
 {
 	_terrain_draw_distance = static_cast<float>(tiles * TILE_SIZE);
@@ -1145,11 +1155,11 @@ void ToggleTerrain3DTabletop(Viewport &vp)
 		MarkWholeScreenDirty();
 		return;
 	}
-	constexpr int TABLETOP_TILES = 32;
+	const int tiles = _settings_client.gui.renderer_3d_table_size;
 	Point centre = PickTerrain3D(vp, vp.left + vp.width / 2, vp.top + vp.height / 2, true);
-	SetTerrain3DTable(TABLETOP_TILES);
+	SetTerrain3DTable(tiles);
 	SetTerrain3DGroundFast(true);
-	StartTerrain3DBench(vp, centre.x, centre.y, TABLETOP_TILES * TILE_SIZE * 0.7f, -50, 60, 0);
+	StartTerrain3DBench(vp, centre.x, centre.y, tiles * TILE_SIZE * 0.7f, -50, 60, 0);
 }
 
 void GetTerrain3DTable(float &x, float &y, float &half)

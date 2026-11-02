@@ -73,7 +73,8 @@ also make railway routes easier to follow. They are on by default.
 
 One finger acts as the mouse, and builds on the tabletop view from the 3D menu as
 it does on the normal view. Two fingers pan, pinch to zoom and turn the main view,
-or in the tabletop view move, grow and turn the table.
+or in the tabletop view move, grow and turn the table. "Tabletop size" in the 3D
+menu sets how many tiles it shows along each side, from 32 to 128.
 `renderer_3d fingers <pan x> <pan y> <scale> <degrees clockwise>` feeds such a
 gesture through the event queue, for testing without two real fingers.
 

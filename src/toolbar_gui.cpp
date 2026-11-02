@@ -64,6 +64,7 @@
 #include "help_gui.h"
 #include "video/proof3d.h"
 #include "settings_internal.h"
+#include "slider_func.h"
 #include "core/string_consumer.hpp"
 #include "screensaver.h"
 
@@ -261,6 +262,65 @@ struct Retro3DWindow : Window {
 	}
 };
 
+static constexpr std::initializer_list<NWidgetPart> _nested_3d_table_widgets = {
+	NWidget(NWID_HORIZONTAL),
+		NWidget(WWT_CLOSEBOX, Colours::Grey),
+		NWidget(WWT_CAPTION, Colours::Grey), SetStringTip(STR_3D_TABLE_TITLE),
+	EndContainer(),
+	NWidget(WWT_PANEL, Colours::Grey),
+		NWidget(NWID_VERTICAL), SetPIP(4, 4, 4), SetPadding(4),
+			NWidget(WWT_TEXT, Colours::Invalid, WID_T3_SIZE), SetStringTip(STR_3D_TABLE_SIZE), SetFill(1, 0),
+			NWidget(WWT_EMPTY, Colours::Invalid, WID_T3_SLIDER), SetMinimalSize(280, 0), SetMinimalTextLines(3, 0), SetFill(1, 0), SetToolTip(STR_3D_TABLE_TIP),
+		EndContainer(),
+	EndContainer(),
+};
+
+static WindowDesc _3d_table_desc(WindowPosition::Automatic, {}, 0, 0, WindowClass::Table3D, WindowClass::MainToolbar, {}, _nested_3d_table_widgets);
+
+/** Change the size of the table while looking at the table, to compare how it looks and performs. */
+struct Table3DWindow : Window {
+	static constexpr int MIN_TILES = 32, MAX_TILES = 128, STEP = 8;
+	static constexpr int NMARKS = (MAX_TILES - MIN_TILES) / STEP + 1;
+
+	Table3DWindow(WindowDesc &desc, WindowNumber number) : Window(desc) { this->InitNested(number); }
+
+	static std::optional<std::string> MarkLabel(int, int, int value)
+	{
+		if ((value - MIN_TILES) % (4 * STEP) != 0) return std::string{};
+		return GetString(STR_JUST_INT, value);
+	}
+
+	std::string GetWidgetString(WidgetID widget, StringID stringid) const override
+	{
+		if (widget != WID_T3_SIZE) return this->Window::GetWidgetString(widget, stringid);
+		const int tiles = _settings_client.gui.renderer_3d_table_size;
+		return GetString(stringid, tiles, tiles);
+	}
+
+	void DrawWidget(const Rect &r, WidgetID widget) const override
+	{
+		if (widget == WID_T3_SLIDER) DrawSliderWidget(r, Colours::Grey, Colours::Grey, TextColour::Black, MIN_TILES, MAX_TILES, NMARKS, _settings_client.gui.renderer_3d_table_size, MarkLabel);
+	}
+
+	void OnClick(Point pt, WidgetID widget, int click_count) override
+	{
+		if (widget != WID_T3_SLIDER) return;
+		int tiles = _settings_client.gui.renderer_3d_table_size;
+		if (ClickSliderWidget(this->GetWidget<NWidgetBase>(widget)->GetCurrentRect(), pt, MIN_TILES, MAX_TILES, NMARKS, tiles)) {
+			SetSettingValue(GetSettingFromName("gui.renderer_3d_table_size")->AsIntSetting(), tiles);
+			this->SetDirty();
+		}
+		if (click_count > 0) this->mouse_capture_widget = widget;
+	}
+
+	EventState OnKeyPress(char32_t, uint16_t keycode) override
+	{
+		if (keycode != WKC_ESC) return EventState::NotHandled;
+		this->Close();
+		return EventState::Handled;
+	}
+};
+
 enum Camera3DMenu {
 	C3M_ENABLE, C3M_GROUND, C3M_HINTS, C3M_CLASSIC, C3M_ORBIT,
 	C3M_LEFT, C3M_RIGHT, C3M_TILT_UP, C3M_TILT_DOWN, C3M_HELP,
@@ -270,6 +330,7 @@ enum Camera3DMenu {
 	C3M_TABLETOP,
 	C3M_TILE_GRID,
 	C3M_PANELS,
+	C3M_TABLE_SIZE,
 };
 
 static void ShowCamera3DMenu(Window *w)
@@ -292,6 +353,7 @@ static void ShowCamera3DMenu(Window *w)
 	list.push_back(MakeDropDownListDividerItem());
 	const Window *main_window = GetMainWindow();
 	list.push_back(MakeDropDownListCheckedItem(main_window != nullptr && main_window->viewport != nullptr && IsTerrain3DTabletop(*main_window->viewport), STR_3D_TABLETOP, C3M_TABLETOP, !enabled));
+	list.push_back(MakeDropDownListStringItem(STR_3D_TABLE_TITLE, C3M_TABLE_SIZE));
 	list.push_back(MakeDropDownListCheckedItem(IsXRPanelsActive(), STR_3D_PANELS, C3M_PANELS, main_window == nullptr || main_window->viewport == nullptr || !IsTerrain3DTabletop(*main_window->viewport)));
 	list.push_back(MakeDropDownListStringItem(STR_3D_CLASSIC, C3M_CLASSIC, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_ORBIT, C3M_ORBIT, !enabled));
@@ -334,6 +396,7 @@ static void SelectCamera3DMenu(int index)
 		case C3M_HELP: AllocateWindowDescFront<Camera3DHelpWindow>(_3d_help_desc, 1); break;
 		case C3M_RETRO: AllocateWindowDescFront<Retro3DWindow>(_3d_retro_desc, 0); break;
 		case C3M_PANELS: SetXRPanels(!IsXRPanelsActive()); break;
+		case C3M_TABLE_SIZE: AllocateWindowDescFront<Table3DWindow>(_3d_table_desc, 0); break;
 		case C3M_TABLETOP:
 			if (Window *main_window = GetMainWindow(); IsProof3DEnabled() && main_window != nullptr && main_window->viewport != nullptr) ToggleTerrain3DTabletop(*main_window->viewport);
 			break;

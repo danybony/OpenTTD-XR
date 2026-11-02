@@ -223,6 +223,7 @@ struct GUISettings {
 	bool renderer_3d_auto_visibility;        ///< Fade obstructions and outline the current 3D focus.
 	bool renderer_3d_retro;                  ///< Apply the optional retro pixel treatment to 3D views.
 	uint8_t renderer_3d_pixel_size;          ///< Pixel block size in physical viewport pixels (1..4).
+	uint8_t renderer_3d_table_size;          ///< Tiles along each side of the table of the tabletop view (32..128).
 	bool renderer_3d_retro_colours;          ///< Quantize the 3D world to 512 colours.
 	bool renderer_3d_retro_dither;           ///< Ordered dithering between quantized colours.
 	bool sg_full_load_any; ///< new full load calculation, any cargo must be full read from pre v93 savegames

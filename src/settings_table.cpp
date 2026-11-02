@@ -121,6 +121,11 @@ static void Renderer3DRetroChanged(int32_t)
 	MarkWholeScreenDirty();
 }
 
+static void Renderer3DTableSizeChanged(int32_t new_value)
+{
+	if (Window *w = GetMainWindow(); w != nullptr && w->viewport != nullptr) ResizeTerrain3DTable(*w->viewport, new_value);
+}
+
 static void Renderer3DVisibilityChanged(int32_t new_value)
 {
 	SetTerrain3DAutoVisibility(new_value != 0);
