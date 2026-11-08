@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "fileio_func.h"
 #include "settings_type.h"
+#include "xr_test_log.h"
 #include <mutex>
 
 #if defined(_WIN32)
@@ -109,6 +110,7 @@ void DebugPrint(Facility facility, Severity severity, std::string &&message)
 #else
 		fmt::print(stderr, "{}dbg: [{}:{}] {}\n", GetLogPrefix(true), _debug_facilities[facility], severity, message);
 #endif
+		XRTestLog("[{}:{}] {}", _debug_facilities[facility], severity, message);
 
 		if (_debug_remote_console.load()) {
 			/* Only add to the queue when there is at least one consumer of the data. */

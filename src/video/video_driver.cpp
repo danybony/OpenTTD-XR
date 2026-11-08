@@ -23,6 +23,7 @@
 #include "video_driver.hpp"
 #include "proof3d.h"
 
+#include "../xr_test_log.h"
 #include "../safeguards.h"
 
 bool _video_hw_accel; ///< Whether to consider hardware accelerated video drivers on startup.
@@ -158,6 +159,7 @@ void VideoDriver::Tick()
 			}
 
 			this->PopulateSystemSprites();
+			XRTestLogTick();
 		}
 
 		this->CheckPaletteAnim();

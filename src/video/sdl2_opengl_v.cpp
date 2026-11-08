@@ -31,6 +31,7 @@
 #include "../3rdparty/opengl/glext.h"
 #include "opengl.h"
 #include "../xr_panels.h"
+#include "../xr_test_log.h"
 #ifdef __EMSCRIPTEN__
 #	include <emscripten.h>
 #	include <emscripten/html5.h>
@@ -201,6 +202,7 @@ void VideoDriver_SDL_OpenGL::ReleaseVideoPointer()
 void VideoDriver_SDL_OpenGL::Paint()
 {
 	PerformanceMeasurer framerate(PerformanceElement::Video);
+	const auto paint_start = std::chrono::steady_clock::now();
 
 	if (this->local_palette.count_dirty != 0) {
 		Blitter *blitter = BlitterFactory::GetCurrentBlitter();
@@ -234,6 +236,7 @@ void VideoDriver_SDL_OpenGL::Paint()
 
 	OpenGLBackend::Get()->Paint();
 	OpenGLBackend::Get()->DrawMouseCursor();
+	XRTestLogFrame(paint_start);
 
 	SDL_GL_SwapWindow(this->sdl_window);
 }

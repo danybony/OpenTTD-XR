@@ -32,6 +32,8 @@ add_subdirectory(widgets)
 add_files(
     xr_panels.cpp
     xr_panels.h
+    xr_test_log.cpp
+    xr_test_log.h
 )
 
 add_files(

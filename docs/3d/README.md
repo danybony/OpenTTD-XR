@@ -94,3 +94,17 @@ rather than on the screen, to see them turn towards the viewer.
 
 Mesa software rendering is refused by default. For a local test build, configure
 with `-DCMAKE_CXX_FLAGS=-DGL_ALLOW_SOFTWARE_RENDERER`.
+
+## Test log
+
+On Android the game keeps a log of the session for testers without debugging
+tools: the device, its display, input devices and XR features, the graphics
+driver, the first input events of each kind and counts of the rest, frame times,
+memory and GPU load every 10 seconds, and the 3D settings whenever they change.
+Every line also goes to logcat with the tag `OpenTTD-XRTest`. "Share test log" in
+the 3D menu sends this session's log, the previous one and the latest crash
+report through the share sheet, and copies them to `Download/OpenTTD-XR`.
+On other systems `OPENTTD_XR_TEST_LOG=<file>` writes the same log.
+"Side by side stereo (test)" in the 3D menu draws perspective views once per eye,
+side by side, for glasses that show such a picture in 3D.
+

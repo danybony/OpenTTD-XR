@@ -79,6 +79,7 @@
 #include "dropdown_common_type.h"
 
 #include "xr_panels.h"
+#include "xr_test_log.h"
 
 #include "safeguards.h"
 
@@ -331,6 +332,8 @@ enum Camera3DMenu {
 	C3M_TILE_GRID,
 	C3M_PANELS,
 	C3M_TABLE_SIZE,
+	C3M_STEREO,
+	C3M_SHARE_LOG,
 };
 
 static void ShowCamera3DMenu(Window *w)
@@ -355,6 +358,7 @@ static void ShowCamera3DMenu(Window *w)
 	list.push_back(MakeDropDownListCheckedItem(main_window != nullptr && main_window->viewport != nullptr && IsTerrain3DTabletop(*main_window->viewport), STR_3D_TABLETOP, C3M_TABLETOP, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_TABLE_TITLE, C3M_TABLE_SIZE));
 	list.push_back(MakeDropDownListCheckedItem(IsXRPanelsActive(), STR_3D_PANELS, C3M_PANELS, main_window == nullptr || main_window->viewport == nullptr || !IsTerrain3DTabletop(*main_window->viewport)));
+	list.push_back(MakeDropDownListCheckedItem(GetProof3DStereo() == 1, STR_3D_STEREO, C3M_STEREO, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_CLASSIC, C3M_CLASSIC, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_ORBIT, C3M_ORBIT, !enabled));
 	list.push_back(MakeDropDownListStringItem(STR_3D_LEFT, C3M_LEFT, !enabled));
@@ -363,6 +367,7 @@ static void ShowCamera3DMenu(Window *w)
 	list.push_back(MakeDropDownListStringItem(STR_3D_TILT_DOWN, C3M_TILT_DOWN, !enabled));
 	list.push_back(MakeDropDownListDividerItem());
 	list.push_back(MakeDropDownListStringItem(STR_3D_HELP_TITLE, C3M_HELP));
+	if (CanShareXRTestLog()) list.push_back(MakeDropDownListStringItem(STR_3D_SHARE_LOG, C3M_SHARE_LOG));
 	/* Keyboard menus must remain open when the invoking button is released. */
 	ShowDropDownList(w, std::move(list), supported ? C3M_ENABLE : C3M_HELP, WID_TN_3D, 0, {DropDownOption::KeyboardNavigation});
 }
@@ -397,6 +402,8 @@ static void SelectCamera3DMenu(int index)
 		case C3M_RETRO: AllocateWindowDescFront<Retro3DWindow>(_3d_retro_desc, 0); break;
 		case C3M_PANELS: SetXRPanels(!IsXRPanelsActive()); break;
 		case C3M_TABLE_SIZE: AllocateWindowDescFront<Table3DWindow>(_3d_table_desc, 0); break;
+		case C3M_STEREO: if (IsProof3DEnabled()) SetProof3DStereo(GetProof3DStereo() == 1 ? 0 : 1); break;
+		case C3M_SHARE_LOG: ShareXRTestLog(); break;
 		case C3M_TABLETOP:
 			if (Window *main_window = GetMainWindow(); IsProof3DEnabled() && main_window != nullptr && main_window->viewport != nullptr) ToggleTerrain3DTabletop(*main_window->viewport);
 			break;

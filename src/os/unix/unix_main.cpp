@@ -21,6 +21,9 @@
 #	include <unistd.h>
 #endif
 
+#include "../../rev.h"
+#include "../../xr_test_log.h"
+
 #include "../../safeguards.h"
 
 #ifdef __ANDROID__
@@ -33,6 +36,9 @@ static void SetupAndroidPaths()
 	setenv("XDG_CONFIG_HOME", (base + "/config").c_str(), 1);
 	setenv("XDG_STATE_HOME", (base + "/state").c_str(), 1);
 	if (chdir((base + "/game").c_str()) != 0) SDL_Log("No game data in %s", base.c_str());
+	/* The activity has already started the file with what it knows about the device. */
+	OpenXRTestLog(base + "/xr-test.log");
+	XRTestLog("game started: OpenTTD {}", _openttd_revision);
 }
 #endif
 
@@ -40,6 +46,12 @@ int CDECL main(int argc, char *argv[])
 {
 #ifdef __ANDROID__
 	SetupAndroidPaths();
+#else
+	/* The same test log as on Android, for trying it out on a desktop. */
+	if (const char *path = getenv("OPENTTD_XR_TEST_LOG"); path != nullptr) {
+		OpenXRTestLog(path);
+		XRTestLog("game started: OpenTTD {}", _openttd_revision);
+	}
 #endif
 
 	/* Make sure our arguments contain only valid UTF-8 characters. */

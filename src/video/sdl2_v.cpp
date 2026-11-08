@@ -23,6 +23,7 @@
 #include "sdl2_v.h"
 #include "touch_gesture.h"
 #include "../xr_panels.h"
+#include "../xr_test_log.h"
 #include <SDL.h>
 #ifdef __EMSCRIPTEN__
 #	include <emscripten.h>
@@ -499,6 +500,7 @@ static void HandleFingerEvent(const SDL_TouchFingerEvent &finger)
 				const auto other = _touch.fingers[tracked == _touch.fingers.begin() ? 1 : 0].pos;
 				const auto step = GetTwoFingerStep(tracked->pos, other, pos, other);
 				HandleTwoFingerGesture(step.pan_x, step.pan_y, step.scale, step.rotate);
+				CountXRTestInput("two_finger_step", fmt::format("pan={:.1f},{:.1f} scale={:.3f} rotate={:.2f}", step.pan_x, step.pan_y, step.scale, step.rotate));
 			} else if (!_touch.gesture) {
 				if (_touch.pending && std::hypot(pos.x - _touch.start.x, pos.y - _touch.start.y) >= TOUCH_PRESS_DISTANCE) PressTouch();
 				if (IsXRPanelDragging()) {
@@ -561,6 +563,67 @@ void PushTwoFingerTestGesture(float pan_x, float pan_y, float scale, float rotat
 	send(SDL_FINGERUP, 2, at(STEPS, -1).x, at(STEPS, -1).y);
 }
 
+/** Note an event in the test log: input is counted, the life of the window and the app is written as it happens. */
+static void LogTestEvent(const SDL_Event &ev)
+{
+	auto touch_type = [](SDL_TouchID id) {
+		switch (SDL_GetTouchDeviceType(id)) {
+			case SDL_TOUCH_DEVICE_DIRECT: return "direct";
+			case SDL_TOUCH_DEVICE_INDIRECT_ABSOLUTE: return "indirect_absolute";
+			case SDL_TOUCH_DEVICE_INDIRECT_RELATIVE: return "indirect_relative";
+			default: return "unknown";
+		}
+	};
+	auto mouse = [](uint32_t which) { return which == SDL_TOUCH_MOUSEID ? "touch" : "mouse"; };
+	switch (ev.type) {
+		case SDL_FINGERDOWN: case SDL_FINGERUP: case SDL_FINGERMOTION:
+			CountXRTestInput(ev.type == SDL_FINGERDOWN ? "finger_down" : ev.type == SDL_FINGERUP ? "finger_up" : "finger_motion",
+				fmt::format("device={} ({}) finger={} x={:.3f} y={:.3f} pressure={:.2f}", ev.tfinger.touchId, touch_type(ev.tfinger.touchId),
+				ev.tfinger.fingerId, ev.tfinger.x, ev.tfinger.y, ev.tfinger.pressure));
+			break;
+		case SDL_MOUSEMOTION:
+			CountXRTestInput(fmt::format("{}_motion", mouse(ev.motion.which)), fmt::format("which={} x={} y={} buttons={}", ev.motion.which, ev.motion.x, ev.motion.y, ev.motion.state));
+			break;
+		case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP:
+			CountXRTestInput(fmt::format("{}_{}", mouse(ev.button.which), ev.type == SDL_MOUSEBUTTONDOWN ? "down" : "up"),
+				fmt::format("which={} button={} clicks={} x={} y={}", ev.button.which, ev.button.button, ev.button.clicks, ev.button.x, ev.button.y));
+			break;
+		case SDL_MOUSEWHEEL:
+			CountXRTestInput("wheel", fmt::format("which={} x={} y={}", ev.wheel.which, ev.wheel.x, ev.wheel.y));
+			break;
+		case SDL_KEYDOWN: case SDL_KEYUP:
+			CountXRTestInput(ev.type == SDL_KEYDOWN ? "key_down" : "key_up", fmt::format("scancode={} ({}) sym={} mod={}",
+				static_cast<int>(ev.key.keysym.scancode), SDL_GetScancodeName(ev.key.keysym.scancode), ev.key.keysym.sym, ev.key.keysym.mod));
+			break;
+		case SDL_TEXTINPUT:
+			CountXRTestInput("text", "");
+			break;
+		case SDL_WINDOWEVENT: {
+			static constexpr std::array<const char *, 17> names{"none", "shown", "hidden", "exposed", "moved", "resized", "size_changed",
+				"minimized", "maximized", "restored", "enter", "leave", "focus_gained", "focus_lost", "close", "take_focus", "hit_test"};
+			const char *name = ev.window.event < names.size() ? names[ev.window.event] : "other";
+			if (ev.window.event == SDL_WINDOWEVENT_EXPOSED || ev.window.event == SDL_WINDOWEVENT_ENTER || ev.window.event == SDL_WINDOWEVENT_LEAVE) {
+				CountXRTestInput(fmt::format("window_{}", name), "");
+			} else {
+				XRTestLog("window: {} {} {}", name, ev.window.data1, ev.window.data2);
+			}
+			break;
+		}
+		case SDL_DISPLAYEVENT: XRTestLog("display: event={} data={}", ev.display.event, ev.display.data1); break;
+		case SDL_APP_TERMINATING: XRTestLog("app: terminating"); break;
+		case SDL_APP_LOWMEMORY: XRTestLog("app: low memory"); break;
+		case SDL_APP_WILLENTERBACKGROUND: XRTestLog("app: entering background"); break;
+		case SDL_APP_DIDENTERBACKGROUND: XRTestLog("app: in background"); break;
+		case SDL_APP_WILLENTERFOREGROUND: XRTestLog("app: entering foreground"); break;
+		case SDL_APP_DIDENTERFOREGROUND: XRTestLog("app: in foreground"); break;
+		case SDL_RENDER_TARGETS_RESET: XRTestLog("render targets reset"); break;
+		case SDL_RENDER_DEVICE_RESET: XRTestLog("render device reset"); break;
+		case SDL_JOYDEVICEADDED: case SDL_CONTROLLERDEVICEADDED: XRTestLog("controller added: event={:#x} id={}", ev.type, ev.cdevice.which); break;
+		case SDL_QUIT: XRTestLog("quit requested"); break;
+		default: CountXRTestInput(fmt::format("sdl_{:#x}", ev.type), ""); break;
+	}
+}
+
 bool VideoDriver_SDL_Base::PollEvent()
 {
 	SDL_Event ev;
@@ -568,6 +631,7 @@ bool VideoDriver_SDL_Base::PollEvent()
 	if (_touch.pending && std::chrono::steady_clock::now() - _touch.since >= TOUCH_PRESS_DELAY) PressTouch();
 
 	if (!SDL_PollEvent(&ev)) return false;
+	if (IsXRTestLogOpen()) LogTestEvent(ev);
 
 	switch (ev.type) {
 		case SDL_FINGERDOWN:

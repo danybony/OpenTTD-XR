@@ -3035,6 +3035,11 @@ void SetProof3DStereo(int mode)
 	MarkWholeScreenDirty();
 }
 
+int GetProof3DStereo()
+{
+	return _stereo_mode;
+}
+
 void SetTerrain3DTileGrid(bool enabled)
 {
 	_ground_grid = enabled;

@@ -30,6 +30,7 @@
 #include "opengl.h"
 #include "opengl_es.h"
 #include "../xr_panels.h"
+#include "../xr_test_log.h"
 #include "proof3d.h"
 #include <atomic>
 #ifdef WITH_3D_PROOF
@@ -678,6 +679,17 @@ std::optional<std::string_view> OpenGLBackend::Init(const Dimension &screen_res)
 	if (!IsOpenGLVersionAtLeast(2, 0) && (!IsOpenGLExtensionSupported("GL_ARB_shader_objects") || !IsOpenGLExtensionSupported("GL_ARB_fragment_shader") || !IsOpenGLExtensionSupported("GL_ARB_vertex_shader"))) return "No shader support";
 	if (!BindShaderExtensions()) return "Failed to bind shader extension functions";
 	if (IsOpenGLVersionAtLeast(3, 2) && _glBindFragDataLocation == nullptr) return "OpenGL claims to support version 3.2 but doesn't have glBindFragDataLocation";
+
+	if (IsXRTestLogOpen()) {
+		XRTestLog("gl: {} - {} ({}), GLSL {}", *vend, *renderer, *ver, GlGetString(GL_SHADING_LANGUAGE_VERSION).value_or("unknown"));
+		std::string extensions;
+		for (std::string_view extension : {"GL_OVR_multiview", "GL_OVR_multiview2", "GL_OVR_multiview_multisampled_render_to_texture",
+				"GL_EXT_multisampled_render_to_texture", "GL_EXT_clip_cull_distance", "GL_EXT_disjoint_timer_query",
+				"GL_EXT_color_buffer_float", "GL_EXT_texture_filter_anisotropic", "GL_KHR_debug", "GL_QCOM_tiled_rendering"}) {
+			fmt::format_to(std::back_inserter(extensions), " {}={}", extension, IsOpenGLExtensionSupported(extension) ? "yes" : "no");
+		}
+		XRTestLog("gl extensions:{}", extensions);
+	}
 
 	this->persistent_mapping_supported = IsOpenGLVersionAtLeast(3, 0) && (IsOpenGLVersionAtLeast(4, 4) || IsOpenGLExtensionSupported("GL_ARB_buffer_storage"));
 #ifndef NO_GL_BUFFER_SYNC

@@ -123,7 +123,7 @@ static void Renderer3DRetroChanged(int32_t)
 
 static void Renderer3DTableSizeChanged(int32_t new_value)
 {
-	if (Window *w = GetMainWindow(); w != nullptr && w->viewport != nullptr) ResizeTerrain3DTable(*w->viewport, new_value);
+	if (Window *w = FindWindowById(WindowClass::MainWindow, 0); w != nullptr && w->viewport != nullptr) ResizeTerrain3DTable(*w->viewport, new_value);
 }
 
 static void Renderer3DVisibilityChanged(int32_t new_value)

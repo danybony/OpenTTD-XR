@@ -6109,6 +6109,8 @@ STR_3D_PANELS                                                  :Windows as float
 STR_3D_TILE_GRID                                               :Lines between tiles
 STR_3D_TABLETOP                                                :Tabletop view
 STR_3D_TABLE_TITLE                                             :Tabletop size
+STR_3D_STEREO                                                  :Side by side stereo (test)
+STR_3D_SHARE_LOG                                               :Share test log
 STR_3D_TABLE_SIZE                                              :{BLACK}{NUM} x {NUM} tiles
 STR_3D_TABLE_TIP                                               :{BLACK}How many tiles the table of the tabletop view shows along each side. Larger tables take more of the graphics card
 STR_3D_HELP_TITLE                                              :3D camera help
